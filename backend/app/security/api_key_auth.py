@@ -1,0 +1,72 @@
+from fastapi import Security, HTTPException, status, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
+from typing import Optional, Dict, Any
+from app.services.api_key_service import api_key_service
+from app.services.auth_service import auth_service
+from app.services.firebase_service import firebase_service
+from app.utils.logging import setup_logger
+
+logger = setup_logger("api_key_auth")
+bearer_scheme = HTTPBearer(auto_error=False)
+header_scheme = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def get_api_key_user(
+    request: Request,
+    bearer: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+    header_key: Optional[str] = Security(header_scheme)
+) -> Dict[str, Any]:
+    """
+    Validates AI VERSE API Key from Bearer token or X-API-Key header.
+    Returns:
+        dict containing 'user' (user record) and 'api_key' (key metadata)
+    """
+    plaintext_key = None
+    if bearer and bearer.credentials:
+        # Check if Bearer is an API key (sk_verse_... or sk-verse-...)
+        if bearer.credentials.startswith("sk_verse_") or bearer.credentials.startswith("sk-verse-"):
+            plaintext_key = bearer.credentials
+        else:
+            # Check if it's a Firebase ID token (allows web playground to call /v1 endpoints)
+            decoded = firebase_service.verify_firebase_id_token(bearer.credentials)
+            if decoded and decoded.get("uid"):
+                user = auth_service.get_or_create_user(decoded["uid"], decoded.get("email"))
+                return {
+                    "user": user,
+                    "api_key": {"keyId": "web_session", "name": "Web Playground Session"}
+                }
+
+    if not plaintext_key and header_key:
+        plaintext_key = header_key
+
+    if not plaintext_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing API key. Provide Bearer token (sk_verse_...) or X-API-Key header."
+        )
+
+    key_record = api_key_service.validate_api_key(plaintext_key)
+    if not key_record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or revoked AI VERSE API key."
+        )
+
+    user_id = key_record.get("userId")
+    user = firebase_service.get_document("users", user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Associated user account not found."
+        )
+
+    if user.get("accountStatus") in {"suspended", "disabled"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Account is {user.get('accountStatus')}."
+        )
+
+    return {
+        "user": user,
+        "api_key": key_record
+    }

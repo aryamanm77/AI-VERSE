@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: ai-verse-backend
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_NAME
+        value: AI VERSE
+      - key: FIREBASE_PROJECT_ID
+        value: ai-verse-7ac4e
+      - key: FIREBASE_DATABASE_ID
+        value: (default)
+      - key: WORKER_TOKEN_HASH_SECRET
+        generateValue: true
+      - key: API_KEY_HASH_SECRET
+        generateValue: true
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://ai-verse.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
+      - key: REQUEST_TIMEOUT_SECONDS
+        value: "120"
+      - key: WORKER_HEARTBEAT_TIMEOUT_SECONDS
+        value: "45"
+      - key: JOB_LEASE_SECONDS
+        value: "60"
+      - key: LOG_LEVEL
+        value: INFO

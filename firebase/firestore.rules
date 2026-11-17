@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.role == 'admin' || 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+
+    // 1. users collection
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      // Users can only update their own profile fields; role and subscriptionStatus are restricted to backend/admin
+      allow create: if isOwner(userId) && request.resource.data.role == 'user';
+      allow update: if (isOwner(userId) && 
+                       !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'subscriptionPlan', 'subscriptionStatus', 'accountStatus']))
+                    || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 2. subscriptions collection
+    match /subscriptions/{subscriptionId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      // Subscriptions can only be created/modified by backend (Admin SDK) or platform admin
+      allow write: if isAdmin();
+    }
+
+    // 3. api_keys collection
+    match /api_keys/{keyId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      // API keys are created and hashed securely via backend API only
+      allow write: if isAdmin();
+    }
+
+    // 4. models collection
+    match /models/{modelId} {
+      // Publicly readable by authenticated users if model is enabled
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 5. workers collection
+    match /workers/{workerId} {
+      // Only readable/writable by admin; worker daemon interacts exclusively via FastAPI backend
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // 6. request_jobs collection
+    match /request_jobs/{jobId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      // Job creation, claiming, and completion occur exclusively through the backend API
+      allow write: if isAdmin();
+    }
+
+    // 7. request_logs collection
+    match /request_logs/{logId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // 8. worker_events collection
+    match /worker_events/{eventId} {
+      allow read, write: if isAdmin();
+    }
+
+    // 9. usage_records collection
+    match /usage_records/{recordId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // 10. system_settings collection
+    match /system_settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+  }
+}
