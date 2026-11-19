@@ -157,8 +157,8 @@ async def create_chat_completion(
             yield f"data: {json.dumps(initial_chunk)}\n\n"
 
             # Stream words and tokens smoothly (OpenAI SSE standard)
-            tokens = re.findall(r"\S+|\s+", raw_text)
-            for token in tokens:
+            token_list = re.findall(r"\S+|\s+", raw_text)
+            for token in token_list:
                 c = {
                     "id": chunk_id,
                     "object": "chat.completion.chunk",
@@ -214,13 +214,13 @@ async def create_chat_completion(
                 }
             }
         )
-    except RuntimeError as re:
-        logger.error(f"Chat completion failed for job {job_id}: {re}")
+    except RuntimeError as r_err:
+        logger.error(f"Chat completion failed for job {job_id}: {r_err}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
                 "error": {
-                    "message": str(re),
+                    "message": str(r_err),
                     "type": "worker_error",
                     "code": "inference_failed",
                     "job_id": job_id
