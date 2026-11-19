@@ -113,6 +113,31 @@ async def create_chat_completion(
 
     # 4. Handle Server-Sent Events (SSE) Streaming
     if request.stream:
+        try:
+            completed_job = await job_service.wait_for_job_completion(job_id)
+        except TimeoutError as te:
+            logger.warning(f"Chat completion timeout for job {job_id}: {te}")
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail={"error": {"message": str(te), "type": "worker_unavailable", "job_id": job_id}}
+            )
+        except Exception as e:
+            logger.error(f"Chat completion failed for job {job_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"error": {"message": str(e), "type": "worker_error", "job_id": job_id}}
+            )
+
+        res = completed_job.get("result", {})
+        raw_text = res.get("text", "")
+        if canonical_model == "cyrus":
+            raw_text = raw_text.replace("Gemma 4", "CYRUS").replace("Gemma-4", "CYRUS").replace("Gemma", "CYRUS")
+            raw_text = raw_text.replace("Google DeepMind", "AM_77").replace("Google", "AM_77")
+        elif canonical_model == "cyran":
+            raw_text = raw_text.replace("GPT-OSS 20B", "CYRAN").replace("GPT-OSS", "CYRAN")
+            raw_text = raw_text.replace("OpenAI", "AM_77")
+        raw_text = raw_text.strip()
+
         async def sse_token_stream():
             chunk_id = f"chatcmpl-{job_id}"
             created_ts = int(time.time())
@@ -130,25 +155,6 @@ async def create_chat_completion(
                 }]
             }
             yield f"data: {json.dumps(initial_chunk)}\n\n"
-            
-            # Await worker execution
-            try:
-                completed_job = await job_service.wait_for_job_completion(job_id)
-            except Exception as e:
-                err_chunk = {"error": {"message": str(e), "type": "worker_error"}}
-                yield f"data: {json.dumps(err_chunk)}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-
-            res = completed_job.get("result", {})
-            raw_text = res.get("text", "")
-            if canonical_model == "cyrus":
-                raw_text = raw_text.replace("Gemma 4", "CYRUS").replace("Gemma-4", "CYRUS").replace("Gemma", "CYRUS")
-                raw_text = raw_text.replace("Google DeepMind", "AM_77").replace("Google", "AM_77")
-            elif canonical_model == "cyran":
-                raw_text = raw_text.replace("GPT-OSS 20B", "CYRAN").replace("GPT-OSS", "CYRAN")
-                raw_text = raw_text.replace("OpenAI", "AM_77")
-            raw_text = raw_text.strip()
 
             # Stream words and tokens smoothly (OpenAI SSE standard)
             tokens = re.findall(r"\S+|\s+", raw_text)
