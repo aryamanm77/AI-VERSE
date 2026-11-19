@@ -353,7 +353,7 @@ export function App() {
     }
   };
 
-  // Handle Send Chat Request
+  // Handle Send Chat Request with Real-Time SSE Token Streaming
   async function send() {
     if (url && !url.startsWith('https://') && !url.includes('localhost') && !url.includes('127.0.0.1')) {
       notify('Please use an HTTPS backend URL in production');
@@ -370,22 +370,62 @@ export function App() {
     try {
       const r = await fetch(url.replace(/\/$/, '') + '/v1/chat/completions', {
         method: 'POST',
-        signal: AbortSignal.timeout(120000),
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
           Authorization: `Bearer ${tokenToUse}`
         },
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: prompt }],
-          stream: false
+          stream: true
         })
       });
-      const data = await r.json();
+
       if (!r.ok) {
-        throw Error(data.error?.message || data.detail?.error?.message || data.detail || `Request failed (${r.status})`);
+        let errorMsg = `Request failed (${r.status})`;
+        try {
+          const errData = await r.json();
+          errorMsg = errData.error?.message || errData.detail?.error?.message || errData.detail || errorMsg;
+        } catch (_) {}
+        throw new Error(errorMsg);
       }
-      setResponse(data.choices?.[0]?.message?.content || JSON.stringify(data, null, 2));
+
+      const reader = r.body?.getReader();
+      if (!reader) {
+        throw new Error('Streaming response body is unavailable.');
+      }
+
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let accumulated = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith(':')) continue;
+          if (trimmed === 'data: [DONE]') {
+            break;
+          }
+          if (trimmed.startsWith('data: ')) {
+            try {
+              const parsed = JSON.parse(trimmed.slice(6));
+              const delta = parsed.choices?.[0]?.delta?.content || '';
+              if (delta) {
+                accumulated += delta;
+                setResponse(accumulated);
+              }
+            } catch (_) {}
+          }
+        }
+      }
     } catch (e) {
       setResponse('Request error: ' + (e instanceof Error ? e.message : 'Unable to reach backend'));
     } finally {
@@ -801,14 +841,29 @@ export function App() {
                 </select>
               </div>
               <div className="chat-area">
-                {response ? (
+                {(response || busy) ? (
                   <div className="answer">
-                    <span className="eyebrow">{model.toUpperCase()} RESPONSE</span>
-                    <p>{response}</p>
-                    <button className="secondary" onClick={() => copy(response)}>
-                      <Copy size={15} />
-                      Copy response
-                    </button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span className="eyebrow">{model.toUpperCase()} RESPONSE</span>
+                      {busy && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#60a5fa', fontFamily: 'monospace' }}>
+                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#60a5fa', display: 'inline-block' }} />
+                          Streaming...
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
+                      {response || 'Thinking...'}
+                      {busy && (
+                        <span style={{ display: 'inline-block', width: '2px', height: '14px', background: '#60a5fa', marginLeft: '3px', verticalAlign: 'middle' }} />
+                      )}
+                    </p>
+                    {response && !busy && (
+                      <button className="secondary" onClick={() => copy(response)}>
+                        <Copy size={15} />
+                        Copy response
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div className="chat-welcome">
