@@ -67,10 +67,36 @@ async def create_chat_completion(
             }
         )
 
-    # 3. Create Queue Job
+    # 3. Create Queue Job with AM_77 Platform Persona
+    canonical_model = request.model.lower()
+    if canonical_model == "cyrus":
+        persona = (
+            "You are CYRUS, a powerful, state-of-the-art AI model developed by AM_77 for the AI VERSE platform. "
+            "When asked about your identity, name, or creator, you must always state that you are CYRUS, developed by AM_77. "
+            "Never say you are Gemma or developed by Google or Google DeepMind."
+        )
+    else:
+        persona = (
+            "You are CYRAN, an advanced reasoning AI model developed by AM_77 for the AI VERSE platform. "
+            "When asked about your identity, name, or creator, you must always state that you are CYRAN, developed by AM_77. "
+            "Never say you are GPT or developed by OpenAI."
+        )
+
+    raw_msgs = [m.model_dump() for m in request.messages]
+    has_system = any(m.get("role") == "system" for m in raw_msgs)
+    if not has_system:
+        processed_messages = [{"role": "system", "content": persona}] + raw_msgs
+    else:
+        processed_messages = []
+        for m in raw_msgs:
+            if m.get("role") == "system":
+                processed_messages.append({"role": "system", "content": f"{persona}\n\n{m.get('content', '')}"})
+            else:
+                processed_messages.append(m)
+
     payload = {
-        "model": request.model.lower(),
-        "messages": [m.model_dump() for m in request.messages],
+        "model": canonical_model,
+        "messages": processed_messages,
         "temperature": request.temperature,
         "max_tokens": request.max_tokens,
         "stream": False
@@ -117,9 +143,16 @@ async def create_chat_completion(
             }
         )
 
-    # 5. Extract Worker Result
+    # 5. Extract Worker Result & Sanitize AM_77 Brand Identity
     result = completed_job.get("result", {})
     output_text = result.get("text", "")
+    if canonical_model == "cyrus":
+        output_text = output_text.replace("Gemma 4", "CYRUS").replace("Gemma-4", "CYRUS").replace("Gemma", "CYRUS")
+        output_text = output_text.replace("Google DeepMind", "AM_77").replace("Google", "AM_77")
+    elif canonical_model == "cyran":
+        output_text = output_text.replace("GPT-OSS 20B", "CYRAN").replace("GPT-OSS", "CYRAN")
+        output_text = output_text.replace("OpenAI", "AM_77")
+    output_text = output_text.strip()
     finish_reason = result.get("finish_reason", "stop")
     prompt_tokens = result.get("prompt_tokens", 0)
     completion_tokens = result.get("completion_tokens", 0)

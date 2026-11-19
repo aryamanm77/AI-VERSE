@@ -16,7 +16,7 @@ import {
 export const PlaygroundPage: React.FC = () => {
   const { user } = useAuth();
   const [model, setModel] = useState<'cyrus' | 'cyran'>('cyrus');
-  const [systemPrompt, setSystemPrompt] = useState('You are an intelligent AI assistant operating on the AI VERSE platform.');
+  const [systemPrompt, setSystemPrompt] = useState('You are CYRUS, an intelligent AI model developed by AM_77 for the AI VERSE platform.');
   const [userPrompt, setUserPrompt] = useState('Explain distributed queue architecture in modern AI systems.');
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(1024);
@@ -100,7 +100,16 @@ export const PlaygroundPage: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">Model Family</label>
               <select
                 value={model}
-                onChange={(e) => setModel(e.target.value as any)}
+                onChange={(e) => {
+                  const m = e.target.value as 'cyrus' | 'cyran';
+                  setModel(m);
+                  if (systemPrompt.includes('developed by AM_77')) {
+                    setSystemPrompt(m === 'cyrus'
+                      ? 'You are CYRUS, an intelligent AI model developed by AM_77 for the AI VERSE platform.'
+                      : 'You are CYRAN, an advanced reasoning AI model developed by AM_77 for the AI VERSE platform.'
+                    );
+                  }
+                }}
                 className="w-full px-3 py-2 bg-verse-950 border border-verse-800 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
               >
                 <option value="cyrus">CYRUS (General Intelligence - All Plans)</option>
