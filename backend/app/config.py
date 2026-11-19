@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     CORS_ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
 
     # Worker & Queue timeouts
-    REQUEST_TIMEOUT_SECONDS: int = 120
-    WORKER_HEARTBEAT_TIMEOUT_SECONDS: int = 45
-    JOB_LEASE_SECONDS: int = 60
+    REQUEST_TIMEOUT_SECONDS: int = 300
+    WORKER_HEARTBEAT_TIMEOUT_SECONDS: int = 60
+    JOB_LEASE_SECONDS: int = 300
     MAX_JOB_RETRIES: int = 2
 
     # Logging

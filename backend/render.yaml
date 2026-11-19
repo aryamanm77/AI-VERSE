@@ -22,10 +22,10 @@ services:
       - key: CORS_ALLOWED_ORIGINS
         value: "https://ai-verse.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
       - key: REQUEST_TIMEOUT_SECONDS
-        value: "120"
+        value: "300"
       - key: WORKER_HEARTBEAT_TIMEOUT_SECONDS
-        value: "45"
-      - key: JOB_LEASE_SECONDS
         value: "60"
+      - key: JOB_LEASE_SECONDS
+        value: "300"
       - key: LOG_LEVEL
         value: INFO
