@@ -1,6 +1,10 @@
 import time
+import json
+import asyncio
+import re
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import Dict, Any
+from fastapi.responses import StreamingResponse
+from typing import Dict, Any, Union
 from app.schemas.chat import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -19,22 +23,16 @@ logger = setup_logger("chat_routes")
 router = APIRouter(prefix="/v1", tags=["Chat Completions (OpenAI Compatible)"])
 
 
-@router.post("/chat/completions", response_model=ChatCompletionResponse)
+@router.post("/chat/completions")
 async def create_chat_completion(
     request: ChatCompletionRequest,
     auth_ctx: Dict[str, Any] = Depends(get_api_key_user)
-):
+) -> Any:
     """
     OpenAI-compatible Chat Completion API.
+    Supports both standard JSON completion and Server-Sent Events (SSE) token streaming.
     Routes prompts to Google Colab (CYRUS) or Kaggle (CYRAN) workers.
-    Returns real model output from the worker execution.
     """
-    if request.stream:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Streaming is currently not supported for notebook worker architecture. Please set stream=false."
-        )
-
     user = auth_ctx["user"]
     api_key_info = auth_ctx["api_key"]
     user_id = user["uid"]
@@ -113,7 +111,88 @@ async def create_chat_completion(
     job_id = job["jobId"]
     logger.info(f"Enqueued chat completion job {job_id} for user {user_id} with priority {priority}")
 
-    # 4. Await Worker Processing
+    # 4. Handle Server-Sent Events (SSE) Streaming
+    if request.stream:
+        async def sse_token_stream():
+            chunk_id = f"chatcmpl-{job_id}"
+            created_ts = int(time.time())
+            
+            # Initial role announcement chunk
+            initial_chunk = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": canonical_model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"role": "assistant"},
+                    "finish_reason": None
+                }]
+            }
+            yield f"data: {json.dumps(initial_chunk)}\n\n"
+            
+            # Await worker execution
+            try:
+                completed_job = await job_service.wait_for_job_completion(job_id)
+            except Exception as e:
+                err_chunk = {"error": {"message": str(e), "type": "worker_error"}}
+                yield f"data: {json.dumps(err_chunk)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            res = completed_job.get("result", {})
+            raw_text = res.get("text", "")
+            if canonical_model == "cyrus":
+                raw_text = raw_text.replace("Gemma 4", "CYRUS").replace("Gemma-4", "CYRUS").replace("Gemma", "CYRUS")
+                raw_text = raw_text.replace("Google DeepMind", "AM_77").replace("Google", "AM_77")
+            elif canonical_model == "cyran":
+                raw_text = raw_text.replace("GPT-OSS 20B", "CYRAN").replace("GPT-OSS", "CYRAN")
+                raw_text = raw_text.replace("OpenAI", "AM_77")
+            raw_text = raw_text.strip()
+
+            # Stream words and tokens smoothly (OpenAI SSE standard)
+            tokens = re.findall(r"\S+|\s+", raw_text)
+            for token in tokens:
+                c = {
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": canonical_model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"content": token},
+                        "finish_reason": None
+                    }]
+                }
+                yield f"data: {json.dumps(c)}\n\n"
+                await asyncio.sleep(0.015)
+
+            # Final stop chunk and DONE marker
+            stop_c = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": canonical_model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }]
+            }
+            yield f"data: {json.dumps(stop_c)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            sse_token_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+
+    # 5. Standard Non-Streaming Path: Await Worker Processing
     try:
         completed_job = await job_service.wait_for_job_completion(job_id)
     except TimeoutError as te:

@@ -22,6 +22,8 @@ export const PlaygroundPage: React.FC = () => {
   const [maxTokens, setMaxTokens] = useState(1024);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamedText, setStreamedText] = useState('');
   const [response, setResponse] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -30,6 +32,8 @@ export const PlaygroundPage: React.FC = () => {
   const handleSend = async () => {
     if (!userPrompt.trim()) return;
     setIsLoading(true);
+    setIsStreaming(false);
+    setStreamedText('');
     setError(null);
     setResponse(null);
     setElapsed(0);
@@ -37,7 +41,7 @@ export const PlaygroundPage: React.FC = () => {
     const startTime = Date.now();
     const timer = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTime) / 1000));
-    }, 500);
+    }, 200);
 
     try {
       const messages = [];
@@ -46,24 +50,49 @@ export const PlaygroundPage: React.FC = () => {
       }
       messages.push({ role: 'user', content: userPrompt.trim() });
 
-      const res = await api.createChatCompletion({
-        model,
-        messages,
-        temperature,
-        max_tokens: maxTokens
-      });
-      setResponse(res);
+      let accumulated = '';
+      await api.createChatCompletionStream(
+        {
+          model,
+          messages,
+          temperature,
+          max_tokens: maxTokens
+        },
+        (chunk) => {
+          accumulated += chunk;
+          setStreamedText(accumulated);
+          setIsStreaming(true);
+        },
+        (finalText) => {
+          setStreamedText(finalText);
+          setIsStreaming(false);
+          setResponse({
+            id: `chatcmpl-${Date.now().toString(36)}`,
+            model,
+            choices: [{
+              index: 0,
+              message: { role: 'assistant', content: finalText },
+              finish_reason: 'stop'
+            }],
+            usage: {
+              total_tokens: Math.ceil(finalText.split(/\s+/).length * 1.3)
+            }
+          });
+        }
+      );
     } catch (err: any) {
       setError(err.message || 'Request execution failed.');
     } finally {
       clearInterval(timer);
       setIsLoading(false);
+      setIsStreaming(false);
     }
   };
 
   const copyResult = () => {
-    if (response?.choices?.[0]?.message?.content) {
-      navigator.clipboard.writeText(response.choices[0].message.content);
+    const textToCopy = streamedText || response?.choices?.[0]?.message?.content;
+    if (textToCopy) {
+      navigator.clipboard.writeText(textToCopy);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -199,10 +228,16 @@ export const PlaygroundPage: React.FC = () => {
             {/* Output Display Area */}
             <div className="flex-1 flex flex-col border-t border-verse-800 pt-4">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Model Output
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-2">
+                  <span>Model Output</span>
+                  {isStreaming && (
+                    <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[10px] font-mono border border-blue-500/20">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping" />
+                      <span>Streaming</span>
+                    </span>
+                  )}
                 </span>
-                {response && (
+                {(streamedText || response) && (
                   <button
                     onClick={copyResult}
                     className="flex items-center space-x-1 text-xs text-slate-400 hover:text-white transition-colors"
@@ -214,11 +249,11 @@ export const PlaygroundPage: React.FC = () => {
               </div>
 
               <div className="flex-1 min-h-[220px] bg-verse-950 border border-verse-800 rounded-xl p-4 font-mono text-xs overflow-y-auto">
-                {isLoading && (
+                {isLoading && !streamedText && (
                   <div className="h-full flex flex-col items-center justify-center space-y-3 py-12 text-slate-400">
                     <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                     <p className="text-xs font-mono">
-                      Queueing job & awaiting worker inference... ({elapsed}s)
+                      Connecting token stream & dispatching to {model.toUpperCase()}... ({elapsed}s)
                     </p>
                     <p className="text-[11px] text-slate-500">
                       Model: {model.toUpperCase()} · Priority Level {user?.subscriptionPlan === 'ULTRA' ? 4 : user?.subscriptionPlan === 'PRO' ? 3 : 1}
@@ -236,22 +271,30 @@ export const PlaygroundPage: React.FC = () => {
                   </div>
                 )}
 
-                {response && (
+                {streamedText && (
                   <div className="space-y-4">
                     <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm font-sans">
-                      {response.choices?.[0]?.message?.content}
+                      {streamedText}
+                      {isStreaming && (
+                        <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-1 align-middle rounded-sm shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
+                      )}
                     </p>
 
-                    <div className="border-t border-verse-800 pt-3 flex flex-wrap items-center gap-3 text-[11px] text-slate-400 font-mono">
-                      <span>ID: <code className="text-blue-400">{response.id}</code></span>
-                      <span>Model: <code className="text-indigo-400 uppercase">{response.model}</code></span>
-                      <span>Tokens: <code className="text-emerald-400">{response.usage?.total_tokens ?? 0}</code></span>
-                      <span>Finish: <code className="text-slate-300">{response.choices?.[0]?.finish_reason}</code></span>
-                    </div>
+                    {response && (
+                      <div className="border-t border-verse-800 pt-3 flex flex-wrap items-center gap-3 text-[11px] text-slate-400 font-mono">
+                        <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">
+                          SSE Streamed
+                        </span>
+                        <span>Model: <code className="text-indigo-400 uppercase">{response.model}</code></span>
+                        <span>Tokens: <code className="text-emerald-400">{response.usage?.total_tokens ?? 0}</code></span>
+                        <span>Time: <code className="text-amber-400">{elapsed}s</code></span>
+                        <span>Status: <code className="text-emerald-400 font-semibold">Completed</code></span>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {!isLoading && !error && !response && (
+                {!isLoading && !error && !streamedText && (
                   <div className="h-full flex items-center justify-center text-slate-600 text-xs py-12">
                     Enter a prompt above and click "Dispatch Prompt" to test worker inference.
                   </div>

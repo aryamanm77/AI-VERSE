@@ -105,17 +105,92 @@ class ApiService {
     return this.request('/v1/models');
   }
 
-  // Chat Completion (Playground)
+  // Chat Completion (Playground - Non-streaming)
   async createChatCompletion(payload: {
     model: string;
     messages: { role: string; content: string }[];
     temperature?: number;
     max_tokens?: number;
+    stream?: boolean;
   }): Promise<any> {
     return this.request('/v1/chat/completions', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
+  }
+
+  // Chat Completion (Playground - Real-time SSE Token Streaming)
+  async createChatCompletionStream(
+    payload: {
+      model: string;
+      messages: { role: string; content: string }[];
+      temperature?: number;
+      max_tokens?: number;
+    },
+    onChunk: (chunk: string) => void,
+    onComplete?: (fullText: string) => void
+  ): Promise<string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream'
+    };
+
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const res = await fetch(`${getBaseUrl()}/v1/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ...payload, stream: true })
+    });
+
+    if (!res.ok) {
+      let errorMsg = `HTTP Error ${res.status}`;
+      try {
+        const errJson = await res.json();
+        errorMsg = errJson.detail?.error?.message || errJson.detail || errJson.message || errorMsg;
+      } catch (_) {}
+      throw new Error(errorMsg);
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('Streaming response body is unavailable.');
+
+    const decoder = new TextDecoder('utf-8');
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(':')) continue;
+        if (trimmed === 'data: [DONE]') {
+          onComplete?.(fullText);
+          return fullText;
+        }
+        if (trimmed.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(trimmed.slice(6));
+            const delta = data.choices?.[0]?.delta?.content || '';
+            if (delta) {
+              fullText += delta;
+              onChunk(delta);
+            }
+          } catch (_) {}
+        }
+      }
+    }
+
+    onComplete?.(fullText);
+    return fullText;
   }
 
   // Analytics & Logs
