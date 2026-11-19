@@ -62,7 +62,7 @@ class JobService:
         Polls Firestore with non-blocking sleep.
         """
         timeout = timeout_seconds or self.settings.REQUEST_TIMEOUT_SECONDS
-        poll_interval = 0.5  # 500ms
+        poll_interval = 0.1  # 100ms high-frequency polling
         elapsed = 0.0
 
         while elapsed < timeout:
