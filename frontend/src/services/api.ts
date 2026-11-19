@@ -87,10 +87,10 @@ class ApiService {
     return this.request<ApiKeyItem[]>('/api/keys');
   }
 
-  async createApiKey(name: string): Promise<{ keyId: string; name: string; apiKey: string; keyPrefix: string; createdAt: string }> {
+  async createApiKey(name: string, format: string = 'markdown', allow_overrides: boolean = false): Promise<{ keyId: string; name: string; apiKey: string; keyPrefix: string; format?: string; allow_overrides?: boolean; createdAt: string }> {
     return this.request('/api/keys', {
       method: 'POST',
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ name, format, allow_overrides })
     });
   }
 

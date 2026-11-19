@@ -19,13 +19,17 @@ async def create_new_api_key(
     """
     key_doc, raw_key = api_key_service.create_api_key(
         user_id=current_user["uid"],
-        name=body.name
+        name=body.name,
+        format_mode=body.format,
+        allow_overrides=body.allow_overrides
     )
     return {
         "keyId": key_doc["keyId"],
         "name": key_doc["name"],
         "apiKey": raw_key,
         "keyPrefix": key_doc["keyPrefix"],
+        "format": key_doc.get("format", "markdown"),
+        "allow_overrides": key_doc.get("allow_overrides", False),
         "createdAt": key_doc["createdAt"],
         "status": key_doc["status"]
     }

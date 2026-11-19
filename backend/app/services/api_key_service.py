@@ -13,9 +13,15 @@ class ApiKeyService:
     def __init__(self):
         self.settings = get_settings()
 
-    def create_api_key(self, user_id: str, name: str = "Default Key") -> Tuple[Dict[str, Any], str]:
+    def create_api_key(
+        self,
+        user_id: str,
+        name: str = "Default Key",
+        format_mode: str = "markdown",
+        allow_overrides: bool = False
+    ) -> Tuple[Dict[str, Any], str]:
         """
-        Creates an API key for a user.
+        Creates an API key for a user with format mode and override policy.
         Returns:
             (key_record, plaintext_key)
         """
@@ -24,12 +30,16 @@ class ApiKeyService:
         key_id = f"key_{uuid.uuid4().hex[:16]}"
         now = utc_iso_now()
 
+        valid_format = format_mode.lower() if format_mode.lower() in ("markdown", "plain", "raw") else "markdown"
+
         key_record = {
             "keyId": key_id,
             "userId": user_id,
             "name": name,
             "keyPrefix": prefix,
             "keyHash": key_hash,
+            "format": valid_format,
+            "allow_overrides": bool(allow_overrides),
             "status": "active",  # active, revoked
             "createdAt": now,
             "lastUsedAt": None,
@@ -86,6 +96,8 @@ class ApiKeyService:
                 "keyId": k.get("keyId"),
                 "name": k.get("name"),
                 "keyPrefix": k.get("keyPrefix"),
+                "format": k.get("format", "markdown"),
+                "allow_overrides": k.get("allow_overrides", False),
                 "status": k.get("status"),
                 "createdAt": k.get("createdAt"),
                 "lastUsedAt": k.get("lastUsedAt"),

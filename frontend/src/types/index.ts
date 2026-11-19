@@ -15,6 +15,8 @@ export interface ApiKeyItem {
   keyId: string;
   name: string;
   keyPrefix: string;
+  format?: string;
+  allow_overrides?: boolean;
   status: 'active' | 'revoked';
   createdAt: string;
   lastUsedAt?: string | null;

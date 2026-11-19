@@ -33,16 +33,31 @@ async def get_api_key_user(
                 user = auth_service.get_or_create_user(decoded["uid"], decoded.get("email"))
                 return {
                     "user": user,
-                    "api_key": {"keyId": "web_session", "name": "Web Playground Session"}
+                    "api_key": {
+                        "keyId": "web_session",
+                        "name": "Web Playground Session",
+                        "format": "markdown",
+                        "allow_overrides": False
+                    }
                 }
+            # Fallback: treat arbitrary bearer credentials as potential API key
+            plaintext_key = bearer.credentials
 
+    # Check X-API-Key header or case-insensitive aliases
     if not plaintext_key and header_key:
         plaintext_key = header_key
 
     if not plaintext_key:
+        for header_name in ("x-api-key", "api-key", "x-auth-token"):
+            val = request.headers.get(header_name)
+            if val:
+                plaintext_key = val.strip()
+                break
+
+    if not plaintext_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing API key. Provide Bearer token (sk_verse_...) or X-API-Key header."
+            detail="Missing API key. Provide via 'Authorization: Bearer <key>' or 'x-api-key' header."
         )
 
     key_record = api_key_service.validate_api_key(plaintext_key)
@@ -51,6 +66,9 @@ async def get_api_key_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or revoked AI VERSE API key."
         )
+
+    key_record.setdefault("format", "markdown")
+    key_record.setdefault("allow_overrides", False)
 
     user_id = key_record.get("userId")
     user = firebase_service.get_document("users", user_id)

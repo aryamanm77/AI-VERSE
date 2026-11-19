@@ -38,6 +38,97 @@ import './style.css';
 import { useAuth } from './context/AuthContext';
 import { api } from './services/api';
 import { ApiKeyItem, WorkerItem, QueueJobItem } from './types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
+const MarkdownRenderer: React.FC<{ content: string; onCopy?: (text: string) => void }> = ({ content, onCopy }) => {
+  return (
+    <div className="gfm-markdown-container">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          code({ inline, className, children, ...props }: any) {
+            const match = /language-(\w+)/.exec(className || '');
+            const lang = match ? match[1] : '';
+            const codeString = String(children).replace(/\n$/, '');
+            if (!inline) {
+              return (
+                <div style={{ margin: '12px 0', borderRadius: '8px', overflow: 'hidden', border: '1px solid #334155', background: '#0b0f17' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 12px', background: '#111827', borderBottom: '1px solid #1f2937', fontSize: '11px', fontFamily: 'monospace', color: '#94a3b8' }}>
+                    <span>{lang || 'code'}</span>
+                    <button
+                      type="button"
+                      onClick={() => onCopy ? onCopy(codeString) : navigator.clipboard.writeText(codeString)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', fontSize: '11px' }}
+                    >
+                      <Copy size={12} />
+                      Copy
+                    </button>
+                  </div>
+                  <pre style={{ margin: 0, padding: '12px', overflowX: 'auto', fontSize: '13px', lineHeight: '1.5', color: '#67e8f9', fontFamily: 'monospace' }}>
+                    <code className={className} {...props}>
+                      {children}
+                    </code>
+                  </pre>
+                </div>
+              );
+            }
+            return (
+              <code style={{ background: '#1e293b', color: '#38bdf8', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace' }} {...props}>
+                {children}
+              </code>
+            );
+          },
+          table({ children }: any) {
+            return (
+              <div style={{ overflowX: 'auto', margin: '14px 0', border: '1px solid #334155', borderRadius: '8px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                  {children}
+                </table>
+              </div>
+            );
+          },
+          thead({ children }: any) {
+            return <thead style={{ background: '#1e293b', color: '#f1f5f9', fontWeight: 600 }}>{children}</thead>;
+          },
+          th({ children }: any) {
+            return <th style={{ padding: '8px 12px', borderBottom: '1px solid #475569', color: '#38bdf8' }}>{children}</th>;
+          },
+          td({ children }: any) {
+            return <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155' }}>{children}</td>;
+          },
+          blockquote({ children }: any) {
+            return (
+              <blockquote style={{ borderLeft: '3px solid #38bdf8', margin: '10px 0', padding: '6px 12px', background: 'rgba(56, 189, 248, 0.08)', borderRadius: '0 6px 6px 0', color: '#cbd5e1', fontStyle: 'italic' }}>
+                {children}
+              </blockquote>
+            );
+          },
+          ul({ children }: any) {
+            return <ul style={{ paddingLeft: '20px', margin: '8px 0', lineHeight: '1.6' }}>{children}</ul>;
+          },
+          ol({ children }: any) {
+            return <ol style={{ paddingLeft: '20px', margin: '8px 0', lineHeight: '1.6' }}>{children}</ol>;
+          },
+          h1({ children }: any) {
+            return <h1 style={{ fontSize: '20px', fontWeight: 700, margin: '14px 0 8px 0', color: '#f8fafc' }}>{children}</h1>;
+          },
+          h2({ children }: any) {
+            return <h2 style={{ fontSize: '17px', fontWeight: 600, margin: '12px 0 6px 0', color: '#f8fafc' }}>{children}</h2>;
+          },
+          h3({ children }: any) {
+            return <h3 style={{ fontSize: '15px', fontWeight: 600, margin: '10px 0 4px 0', color: '#f8fafc' }}>{children}</h3>;
+          },
+          p({ children }: any) {
+            return <p style={{ margin: '6px 0', lineHeight: '1.6' }}>{children}</p>;
+          }
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+};
 
 const nav = [
   ['Overview', LayoutDashboard],
@@ -127,6 +218,8 @@ export function App() {
   const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([]);
   const [loadingKeys, setLoadingKeys] = useState(false);
   const [newKeyName, setNewKeyName] = useState('Primary API Key');
+  const [newKeyFormat, setNewKeyFormat] = useState<'markdown' | 'plain' | 'raw'>('markdown');
+  const [newKeyOverrides, setNewKeyOverrides] = useState<boolean>(false);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
 
   const [workers, setWorkers] = useState<WorkerItem[]>([]);
@@ -298,7 +391,7 @@ export function App() {
       return;
     }
     try {
-      const res = await api.createApiKey(newKeyName || 'Primary Key');
+      const res = await api.createApiKey(newKeyName || 'Primary Key', newKeyFormat, newKeyOverrides);
       setGeneratedKey(res.apiKey);
       setKey(res.apiKey);
       localStorage.setItem('aiverse-key', res.apiKey);
@@ -852,12 +945,16 @@ export function App() {
                         </span>
                       )}
                     </div>
-                    <p style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
-                      {response || 'Thinking...'}
+                    <div style={{ lineHeight: '1.6' }}>
+                      {response ? (
+                        <MarkdownRenderer content={response} onCopy={copy} />
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Thinking...</span>
+                      )}
                       {busy && (
                         <span style={{ display: 'inline-block', width: '2px', height: '14px', background: '#60a5fa', marginLeft: '3px', verticalAlign: 'middle' }} />
                       )}
-                    </p>
+                    </div>
                     {response && !busy && (
                       <button className="secondary" onClick={() => copy(response)}>
                         <Copy size={15} />
@@ -917,7 +1014,7 @@ export function App() {
               </div>
               <div className="table-head">
                 <span>NAME</span>
-                <span>KEY</span>
+                <span>KEY / FORMAT</span>
                 <span>CREATED</span>
                 <span>STATUS / ACTION</span>
               </div>
@@ -941,8 +1038,28 @@ export function App() {
                         alignItems: 'center'
                       }}
                     >
-                      <strong>{k.name}</strong>
-                      <code style={{ color: '#ffae84' }}>{k.keyPrefix}...</code>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        <strong>{k.name}</strong>
+                        {k.allow_overrides && (
+                          <span style={{ fontSize: '9px', color: '#38bdf8' }}>Overrides enabled</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <code style={{ color: '#ffae84' }}>{k.keyPrefix}...</code>
+                        <span
+                          style={{
+                            fontSize: '9px',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            fontFamily: 'monospace',
+                            background: k.format === 'raw' ? 'rgba(192, 132, 252, 0.15)' : k.format === 'plain' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(56, 189, 248, 0.15)',
+                            color: k.format === 'raw' ? '#c084fc' : k.format === 'plain' ? '#fbbf24' : '#38bdf8',
+                            border: `1px solid ${k.format === 'raw' ? 'rgba(192, 132, 252, 0.3)' : k.format === 'plain' ? 'rgba(251, 191, 36, 0.3)' : 'rgba(56, 189, 248, 0.3)'}`
+                          }}
+                        >
+                          {(k.format || 'markdown').toUpperCase()}
+                        </span>
+                      </div>
                       <span>{new Date(k.createdAt).toLocaleDateString()}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <span className="badge" style={{ color: '#95c69c' }}>
@@ -1320,6 +1437,34 @@ export function App() {
                         placeholder="e.g. Colab Notebook Key"
                         required
                       />
+                    </label>
+                    <label style={{ display: 'block', fontSize: '12px', marginBottom: '15px' }}>
+                      Server Formatting Mode
+                      <select
+                        style={{
+                          width: '100%',
+                          background: '#111214',
+                          border: '1px solid #3c3d43',
+                          padding: '10px',
+                          borderRadius: '6px',
+                          color: '#fff',
+                          marginTop: '8px'
+                        }}
+                        value={newKeyFormat}
+                        onChange={(e) => setNewKeyFormat(e.target.value as any)}
+                      >
+                        <option value="markdown">Markdown (Default — Enforce GitHub-Flavored Markdown)</option>
+                        <option value="plain">Plain Text (Forbid Markdown symbols/code blocks)</option>
+                        <option value="raw">Raw / Passthrough (Skip server prompt for custom/JSON)</option>
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', marginBottom: '18px', cursor: 'pointer', color: 'var(--text)' }}>
+                      <input
+                        type="checkbox"
+                        checked={newKeyOverrides}
+                        onChange={(e) => setNewKeyOverrides(e.target.checked)}
+                      />
+                      Allow client parameter overrides (temperature, top_p)
                     </label>
                     <button className="primary" type="submit">
                       Create key
