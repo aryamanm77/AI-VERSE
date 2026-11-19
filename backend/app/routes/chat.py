@@ -132,7 +132,7 @@ async def create_chat_completion(
         server_system_content = persona
 
     # 5. Enforce Server Prompt as Message 0; Client System Prompts Placed After
-    client_msgs = [m.model_dump() for m in request.messages]
+    client_msgs = [{"role": m.role, "content": m.content or ""} for m in request.messages]
     client_system_msgs = [m for m in client_msgs if m.get("role") == "system"]
     client_other_msgs = [m for m in client_msgs if m.get("role") != "system"]
 
