@@ -82,6 +82,18 @@ class UsageService:
             plan = u.get("subscriptionPlan", "STARTER")
             sub_dist[plan] = sub_dist.get(plan, 0) + 1
 
+        # Real platform logs telemetry
+        total_tokens = sum(log.get("totalTokens", 0) for log in logs)
+        prompt_tokens = sum(log.get("inputTokens", 0) for log in logs)
+        completion_tokens = sum(log.get("outputTokens", 0) for log in logs)
+        latencies = [log.get("latencyMs", 0) for log in logs if log.get("latencyMs", 0) > 0]
+        avg_latency = (sum(latencies) / len(latencies)) if latencies else 0.0
+
+        model_breakdown: Dict[str, int] = {}
+        for log in logs:
+            m = log.get("modelId", "unknown").lower()
+            model_breakdown[m] = model_breakdown.get(m, 0) + 1
+
         return {
             "totalUsers": len(users),
             "activeUsers": sum(1 for u in users if u.get("accountStatus") == "active"),
@@ -100,7 +112,12 @@ class UsageService:
                 "completed": completed_jobs,
                 "failed": failed_jobs
             },
-            "totalLogs": len(logs)
+            "totalLogs": len(logs),
+            "totalTokens": total_tokens,
+            "promptTokens": prompt_tokens,
+            "completionTokens": completion_tokens,
+            "averageLatencyMs": round(avg_latency, 2),
+            "modelBreakdown": model_breakdown
         }
 
 

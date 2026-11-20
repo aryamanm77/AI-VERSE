@@ -23,10 +23,17 @@ const getBaseUrl = (): string => {
 };
 
 class ApiService {
-  private token: string | null = null;
+  private token: string | null = (typeof localStorage !== 'undefined' ? (localStorage.getItem('ai_verse_dev_token') || localStorage.getItem('aiverse-token')) : null);
 
   setToken(token: string | null) {
     this.token = token;
+    if (typeof localStorage !== 'undefined') {
+      if (token) {
+        localStorage.setItem('ai_verse_dev_token', token);
+      } else {
+        localStorage.removeItem('ai_verse_dev_token');
+      }
+    }
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -35,8 +42,9 @@ class ApiService {
       ...(options.headers as Record<string, string> || {})
     };
 
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+    const tokenToUse = this.token || (typeof localStorage !== 'undefined' ? localStorage.getItem('ai_verse_dev_token') : null);
+    if (tokenToUse) {
+      headers['Authorization'] = `Bearer ${tokenToUse}`;
     }
 
     const res = await fetch(`${getBaseUrl()}${endpoint}`, {

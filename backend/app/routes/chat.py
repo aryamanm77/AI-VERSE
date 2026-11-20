@@ -167,6 +167,7 @@ async def create_chat_completion(
     if key_bank_service.has_active_keys():
         logger.info(f"Fulfilling chat completion via KeyBankService [Model: {target_model_name}, stream={request.stream}]")
         try:
+            inference_start = time.time()
             bank_res = await key_bank_service.execute_completion(
                 model_name=target_model_name,
                 messages=processed_messages,
@@ -175,6 +176,7 @@ async def create_chat_completion(
                 top_p=eff_top_p,
                 stream=False
             )
+            measured_latency_ms = max(1, int((time.time() - inference_start) * 1000))
             raw_text = bank_res.get("choices", [{}])[0].get("message", {}).get("content", "")
             if not raw_text:
                 raw_text = bank_res.get("choices", [{}])[0].get("message", {}).get("reasoning", "")
@@ -185,8 +187,8 @@ async def create_chat_completion(
 
             # Calculate token counts & record request log for analytics and history
             usage_data = bank_res.get("usage", {})
-            prompt_toks = usage_data.get("prompt_tokens", max(1, len(str(processed_messages)) // 4))
-            comp_toks = usage_data.get("completion_tokens", max(1, len(output_text) // 4))
+            prompt_toks = usage_data.get("prompt_tokens") or max(1, len(str(processed_messages)) // 4)
+            comp_toks = usage_data.get("completion_tokens") or max(1, len(output_text) // 4)
             try:
                 from app.utils.datetime_utils import utc_iso_now
                 log_doc = {
@@ -199,7 +201,7 @@ async def create_chat_completion(
                     "inputTokens": prompt_toks,
                     "outputTokens": comp_toks,
                     "totalTokens": prompt_toks + comp_toks,
-                    "latencyMs": 320,
+                    "latencyMs": measured_latency_ms,
                     "createdAt": utc_iso_now(),
                     "provider": "Key Bank Engine",
                     "stream": request.stream
