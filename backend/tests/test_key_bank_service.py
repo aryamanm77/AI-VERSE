@@ -86,3 +86,41 @@ async def test_key_bank_live_inference():
     assert "choices" in result
     content = result["choices"][0]["message"]["content"]
     assert len(content) > 0
+
+
+def test_key_bank_cloudflare_helpers():
+    """Verify Cloudflare Workers AI response and chunk extractors."""
+    # 1. Non-streaming OpenAI format in Cloudflare
+    resp_openai = {
+        "result": {
+            "choices": [{"message": {"role": "assistant", "content": "Hello from 8B"}}]
+        }
+    }
+    assert KeyBankService._extract_cf_text(resp_openai) == "Hello from 8B"
+
+    # 2. Non-streaming raw response format in Cloudflare (70B)
+    resp_raw = {
+        "result": {
+            "response": "Hello from 70B"
+        }
+    }
+    assert KeyBankService._extract_cf_text(resp_raw) == "Hello from 70B"
+
+    # 3. Streaming chunks
+    chunk_openai = {"choices": [{"delta": {"content": "token1"}}]}
+    chunk_raw = {"response": "token2"}
+    assert KeyBankService._extract_cf_chunk_delta(chunk_openai) == "token1"
+    assert KeyBankService._extract_cf_chunk_delta(chunk_raw) == "token2"
+
+
+def test_key_bank_auto_detect_provider():
+    """Verify provider detection based on key format."""
+    service = KeyBankService()
+    k_groq = service.add_key("gsk_1234567890abcdef")
+    k_nv = service.add_key("nvapi-1234567890abcdef")
+    k_cf = service.add_key("cfut_1234567890abcdef")
+
+    assert k_groq.provider == "groq"
+    assert k_nv.provider == "nvidia"
+    assert k_cf.provider == "cloudflare"
+

@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     KEY_BANK_NVIDIA_KEYS: str = ""
     NVIDIA_API_KEY: str = ""
+    KEY_BANK_CLOUDFLARE_KEYS: str = ""
+    CLOUDFLARE_API_KEY: str = ""
+    CLOUDFLARE_ACCOUNT_ID: str = "43c23c8793161bb5497dcacaf1706358"
 
     # CORS
     CORS_ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"

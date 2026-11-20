@@ -3,6 +3,7 @@ import os
 import asyncio
 import uuid
 import httpx
+import json
 from typing import List, Dict, Any, Optional, AsyncGenerator, Union
 from app.config import get_settings
 from app.services.firebase_service import firebase_service
@@ -10,15 +11,16 @@ from app.utils.logging import setup_logger
 
 logger = setup_logger("key_bank_service")
 
-# Pre-seeded bank of keys provided by admin or environment
+# Pre-seeded bank of keys provided by admin or environment (kept empty in git to satisfy secret scanning)
 DEFAULT_GROQ_KEYS: List[str] = []
 
 
 class KeyRecord:
-    def __init__(self, key_id: str, api_key: str, provider: str = "groq"):
+    def __init__(self, key_id: str, api_key: str, provider: str = "groq", account_id: Optional[str] = None):
         self.key_id = key_id
         self.api_key = api_key.strip()
         self.provider = provider
+        self.account_id = account_id
         self.status = "active"  # "active", "cooling_down", "disabled"
         self.cooldown_until: float = 0.0
         self.success_count: int = 0
@@ -49,7 +51,7 @@ class KeyRecord:
         self.cooldown_until = time.time() + cooldown_seconds
         self.failure_count += 1
         self.last_error = reason
-        logger.warning(f"Key {self.masked_key} placed in cooldown for {cooldown_seconds}s. Reason: {reason}")
+        logger.warning(f"Key {self.masked_key} ({self.provider}) placed in cooldown for {cooldown_seconds}s. Reason: {reason}")
 
     def mark_success(self):
         self.status = "active"
@@ -62,8 +64,9 @@ class KeyRecord:
 class KeyBankService:
     """
     High-availability Key Bank and Smart Load Balancer.
-    Pools multiple provider API keys, balances load across them,
-    and automatically fails over when any key experiences a rate limit (HTTP 429).
+    Pools multiple provider API keys (Groq, Cloudflare Workers AI, NVIDIA NIM),
+    balances load across them round-robin, and automatically fails over
+    when any key experiences rate limits (HTTP 429) or transient provider errors.
     """
 
     def __init__(self):
@@ -76,38 +79,75 @@ class KeyBankService:
     def _initialize_keys(self):
         seen_keys = set()
 
-        def add_single_key(raw_key: str):
+        def add_single_key(raw_key: str, force_provider: Optional[str] = None, account_id: Optional[str] = None):
             k = raw_key.strip()
             if k and k not in seen_keys and len(k) > 10:
                 seen_keys.add(k)
-                provider = "nvidia" if k.startswith("nvapi-") else "groq"
-                record = KeyRecord(key_id=f"kb_{uuid.uuid4().hex[:8]}", api_key=k, provider=provider)
+                if force_provider:
+                    provider = force_provider
+                elif k.startswith("nvapi-"):
+                    provider = "nvidia"
+                elif k.startswith("cfut_"):
+                    provider = "cloudflare"
+                else:
+                    provider = "groq"
+                
+                acct = account_id or (self.settings.CLOUDFLARE_ACCOUNT_ID if provider == "cloudflare" else None)
+                record = KeyRecord(
+                    key_id=f"kb_{uuid.uuid4().hex[:8]}",
+                    api_key=k,
+                    provider=provider,
+                    account_id=acct
+                )
                 self._keys.append(record)
 
         # 1. Load Groq keys from environment
         env_keys_str = self.settings.KEY_BANK_GROQ_KEYS or ""
         if env_keys_str:
             for k in env_keys_str.split(","):
-                add_single_key(k)
+                add_single_key(k, force_provider="groq")
 
         if self.settings.GROQ_API_KEY:
-            add_single_key(self.settings.GROQ_API_KEY)
+            add_single_key(self.settings.GROQ_API_KEY, force_provider="groq")
 
-        # 2. Load NVIDIA NIM keys from environment
+        # 2. Load Cloudflare Workers AI tokens from environment
+        cf_keys_str = self.settings.KEY_BANK_CLOUDFLARE_KEYS or ""
+        if cf_keys_str:
+            for k in cf_keys_str.split(","):
+                add_single_key(k, force_provider="cloudflare", account_id=self.settings.CLOUDFLARE_ACCOUNT_ID)
+
+        if self.settings.CLOUDFLARE_API_KEY:
+            add_single_key(self.settings.CLOUDFLARE_API_KEY, force_provider="cloudflare", account_id=self.settings.CLOUDFLARE_ACCOUNT_ID)
+
+        # 3. Load NVIDIA NIM keys from environment
         nv_keys_str = self.settings.KEY_BANK_NVIDIA_KEYS or ""
         if nv_keys_str:
             for k in nv_keys_str.split(","):
-                add_single_key(k)
+                add_single_key(k, force_provider="nvidia")
 
         if self.settings.NVIDIA_API_KEY:
-            add_single_key(self.settings.NVIDIA_API_KEY)
+            add_single_key(self.settings.NVIDIA_API_KEY, force_provider="nvidia")
 
-        # 3. Seed with defaults in production or when explicitly enabled in tests
+        # 4. Seed with defaults in production or when explicitly enabled in tests
         if self.settings.APP_ENV != "testing" or os.environ.get("ENABLE_KEY_BANK_TESTS"):
             for dk in DEFAULT_GROQ_KEYS:
-                add_single_key(dk)
+                add_single_key(dk, force_provider="groq")
 
-        logger.info(f"KeyBankService initialized with {len(self._keys)} active keys in pool.")
+        logger.info(f"KeyBankService initialized with {len(self._keys)} active keys across Groq, Cloudflare, and NVIDIA.")
+
+    def add_key(self, api_key: str, provider: Optional[str] = None, account_id: Optional[str] = None) -> KeyRecord:
+        k = api_key.strip()
+        if not provider:
+            if k.startswith("nvapi-"):
+                provider = "nvidia"
+            elif k.startswith("cfut_"):
+                provider = "cloudflare"
+            else:
+                provider = "groq"
+        acct = account_id or (self.settings.CLOUDFLARE_ACCOUNT_ID if provider == "cloudflare" else None)
+        record = KeyRecord(key_id=f"kb_{uuid.uuid4().hex[:8]}", api_key=k, provider=provider, account_id=acct)
+        self._keys.append(record)
+        return record
 
     def has_active_keys(self) -> bool:
         return any(k.is_available() for k in self._keys)
@@ -123,7 +163,7 @@ class KeyBankService:
         async with self._lock:
             available = [k for k in self._keys if k.is_available()]
             if not available:
-                # Check if any cooling key is ready or shortest wait
+                # Check if any cooling key is ready
                 now = time.time()
                 for k in self._keys:
                     if k.status == "cooling_down" and now >= k.cooldown_until:
@@ -138,7 +178,7 @@ class KeyBankService:
 
     def map_model_name(self, target_model_name: str) -> str:
         """
-        Maps AI VERSE public models to underlying inference engine models.
+        Maps AI VERSE public models to underlying Groq inference engine models.
         CYRUS -> qwen/qwen3.8-27b (Fast, versatile general intelligence)
         CYRAN -> openai/gpt-oss-20b (Deep multi-step reasoning)
         """
@@ -146,6 +186,32 @@ class KeyBankService:
         if "cyran" in m_lower or "reason" in m_lower:
             return "openai/gpt-oss-20b"
         return "qwen/qwen3.8-27b"
+
+    @staticmethod
+    def _extract_cf_text(data: Dict[str, Any]) -> str:
+        """Extracts text content from various Cloudflare Workers AI model response formats."""
+        res = data.get("result", data)
+        if isinstance(res, dict):
+            choices = res.get("choices")
+            if choices and isinstance(choices, list) and len(choices) > 0:
+                msg = choices[0].get("message", {})
+                if isinstance(msg, dict) and "content" in msg and msg["content"]:
+                    return msg["content"]
+            if "response" in res and isinstance(res["response"], str):
+                return res["response"]
+        return ""
+
+    @staticmethod
+    def _extract_cf_chunk_delta(chunk: Dict[str, Any]) -> str:
+        """Extracts delta token from streaming Cloudflare Workers AI chunks."""
+        choices = chunk.get("choices")
+        if choices and isinstance(choices, list) and len(choices) > 0:
+            delta = choices[0].get("delta", {})
+            if isinstance(delta, dict) and "content" in delta and delta["content"]:
+                return delta["content"]
+        if "response" in chunk and isinstance(chunk["response"], str):
+            return chunk["response"]
+        return ""
 
     async def execute_completion(
         self,
@@ -158,11 +224,11 @@ class KeyBankService:
     ) -> Union[Dict[str, Any], AsyncGenerator[Dict[str, Any], None]]:
         """
         Executes a completion request across the key bank.
-        On HTTP 429 or transient connection errors, immediately rotates to the next key.
+        On HTTP 429 or transient connection errors, immediately rotates to the next available key.
+        Supports Groq, Cloudflare Workers AI, and NVIDIA NIM providers.
         """
-        engine_model = self.map_model_name(model_name)
         payload = {
-            "model": engine_model,
+            "model": self.map_model_name(model_name),
             "messages": messages,
             "temperature": temperature,
             "top_p": top_p,
@@ -185,16 +251,28 @@ class KeyBankService:
                 "Content-Type": "application/json"
             }
 
+            # Select Provider Endpoint & Target Model
             if key_record.provider == "nvidia":
                 endpoint = "https://integrate.api.nvidia.com/v1/chat/completions"
                 engine_model = "google/gemma-4-31b-it" if "cyrus" in model_name.lower() else "mistralai/mistral-large-4-1t-a52b"
                 timeout_sec = 25.0
+                req_payload = {**payload, "model": engine_model}
+            elif key_record.provider == "cloudflare":
+                cf_model = "@cf/meta/llama-3.1-70b-instruct" if ("cyran" in model_name.lower() or "reason" in model_name.lower()) else "@cf/meta/llama-3.1-8b-instruct"
+                account_id = key_record.account_id or self.settings.CLOUDFLARE_ACCOUNT_ID or "43c23c8793161bb5497dcacaf1706358"
+                endpoint = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{cf_model}"
+                timeout_sec = 30.0
+                req_payload = {
+                    "messages": messages,
+                    "stream": stream
+                }
+                if max_tokens:
+                    req_payload["max_tokens"] = max_tokens
             else:
                 endpoint = "https://api.groq.com/openai/v1/chat/completions"
                 engine_model = self.map_model_name(model_name)
                 timeout_sec = 45.0
-
-            payload["model"] = engine_model
+                req_payload = {**payload, "model": engine_model}
 
             try:
                 if not stream:
@@ -202,22 +280,39 @@ class KeyBankService:
                         resp = await client.post(
                             endpoint,
                             headers=headers,
-                            json=payload
+                            json=req_payload
                         )
 
                         if resp.status_code == 200:
                             key_record.mark_success()
                             data = resp.json()
+                            if key_record.provider == "cloudflare":
+                                text = self._extract_cf_text(data)
+                                return {
+                                    "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+                                    "object": "chat.completion",
+                                    "created": int(time.time()),
+                                    "model": model_name,
+                                    "choices": [{
+                                        "index": 0,
+                                        "message": {
+                                            "role": "assistant",
+                                            "content": text
+                                        },
+                                        "finish_reason": "stop"
+                                    }],
+                                    "usage": data.get("result", {}).get("usage", {})
+                                }
                             return data
                         elif resp.status_code == 429:
                             # Rate limit hit -> cool down and fail over
                             key_record.mark_cooling(cooldown_seconds=60, reason="HTTP 429 Rate Limit Exceeded")
-                            logger.warning(f"Key {key_record.masked_key} hit 429. Failing over to next key (attempt {attempt})...")
+                            logger.warning(f"Key {key_record.masked_key} ({key_record.provider}) hit 429. Failing over (attempt {attempt})...")
                             continue
                         elif resp.status_code in {401, 403}:
                             key_record.status = "disabled"
                             key_record.last_error = f"HTTP {resp.status_code} Auth Failed"
-                            logger.error(f"Key {key_record.masked_key} auth failed. Disabled from bank.")
+                            logger.error(f"Key {key_record.masked_key} ({key_record.provider}) auth failed. Disabled from bank.")
                             continue
                         else:
                             # Server error on engine side
@@ -233,7 +328,7 @@ class KeyBankService:
                         "POST",
                         endpoint,
                         headers=headers,
-                        json=payload
+                        json=req_payload
                     )
                     resp = await client.send(req, stream=True)
 
@@ -252,9 +347,24 @@ class KeyBankService:
                                             yield {"is_done": True, "chunk": None}
                                             break
                                         try:
-                                            import json
                                             chunk_obj = json.loads(data_part)
-                                            yield {"is_done": False, "chunk": chunk_obj}
+                                            if key_record.provider == "cloudflare":
+                                                delta_text = self._extract_cf_chunk_delta(chunk_obj)
+                                                if delta_text:
+                                                    standardized_chunk = {
+                                                        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+                                                        "object": "chat.completion.chunk",
+                                                        "created": int(time.time()),
+                                                        "model": model_name,
+                                                        "choices": [{
+                                                            "index": 0,
+                                                            "delta": {"content": delta_text},
+                                                            "finish_reason": None
+                                                        }]
+                                                    }
+                                                    yield {"is_done": False, "chunk": standardized_chunk}
+                                            else:
+                                                yield {"is_done": False, "chunk": chunk_obj}
                                         except Exception:
                                             pass
                             finally:
@@ -275,7 +385,7 @@ class KeyBankService:
                         continue
 
             except Exception as e:
-                logger.warning(f"Exception using key {key_record.masked_key}: {e}. Retrying with next key...")
+                logger.warning(f"Exception using key {key_record.masked_key} ({key_record.provider}): {e}. Retrying with next key...")
                 key_record.mark_cooling(cooldown_seconds=30, reason=str(e))
                 continue
 

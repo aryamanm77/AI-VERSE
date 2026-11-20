@@ -16,7 +16,8 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Portal"])
 
 class AddKeyBankRequest(BaseModel):
     key: str
-    provider: str = "groq"
+    provider: Optional[str] = None
+    account_id: Optional[str] = None
 
 
 @router.get("/key-bank")
@@ -34,12 +35,9 @@ async def add_key_to_bank(
     body: AddKeyBankRequest,
     admin: Dict[str, Any] = Depends(require_admin)
 ):
-    """Adds a new API key to the live pool."""
-    import uuid
-    from app.services.key_bank_service import KeyRecord
-    record = KeyRecord(key_id=f"kb_{uuid.uuid4().hex[:8]}", api_key=body.key, provider=body.provider)
-    key_bank_service._keys.append(record)
-    return {"status": "added", "key_id": record.key_id, "masked_key": record.masked_key}
+    """Adds a new API key to the live pool (Groq, Cloudflare Workers AI, or NVIDIA NIM)."""
+    record = key_bank_service.add_key(api_key=body.key, provider=body.provider, account_id=body.account_id)
+    return {"status": "added", "key_id": record.key_id, "masked_key": record.masked_key, "provider": record.provider}
 
 
 @router.get("/overview")
