@@ -43,6 +43,15 @@ import { ApiKeyItem, WorkerItem, QueueJobItem } from './types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+const GoogleIcon = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
+    <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"/>
+    <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"/>
+    <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12 0 14.5s.7 4.8 1.9 7.2l3.7-2.9z"/>
+    <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.4-6.4-5.2L1.9 16c1.8 3.7 5.6 7 10.1 7z"/>
+  </svg>
+);
+
 const MarkdownRenderer: React.FC<{ content: string; onCopy?: (text: string) => void }> = ({ content, onCopy }) => {
   return (
     <div className="gfm-markdown-container">
@@ -819,6 +828,39 @@ export function App() {
               Docs
               <ArrowUpRight size={14} />
             </button>
+            {!firebaseUser ? (
+              <button
+                className="secondary"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  background: '#1b1d22',
+                  border: '1px solid #ffaa8466',
+                  color: '#fff',
+                  cursor: 'pointer'
+                }}
+                onClick={async () => {
+                  try {
+                    await loginWithGoogle();
+                    notify('Signed in with Google!');
+                  } catch (err: any) {
+                    setAuthError(err.message || 'Google Sign-In failed');
+                    setModal('Account');
+                  }
+                }}
+              >
+                <GoogleIcon size={14} />
+                <span>Sign in with Google</span>
+              </button>
+            ) : (
+              <span className="badge" style={{ border: '1px solid #4a6a50', color: '#95c69c', display: 'flex', gap: '6px', alignItems: 'center', padding: '5px 8px' }}>
+                <GoogleIcon size={12} /> Google Verified
+              </span>
+            )}
             <button className="avatar small" onClick={() => setModal('Account')}>
               {userInitial}
             </button>
@@ -1475,6 +1517,37 @@ export function App() {
                 <Check size={16} />
               </button>
               <hr />
+              <h2>Account & Authentication</h2>
+              <p>Connect your personal Google account to synchronize your AI VERSE workspace across devices.</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginTop: '12px', marginBottom: '20px' }}>
+                <button
+                  className="primary"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '10px 18px',
+                    borderRadius: '6px',
+                    fontSize: '12px'
+                  }}
+                  onClick={async () => {
+                    try {
+                      await loginWithGoogle();
+                      notify('Signed in with Google!');
+                    } catch (err: any) {
+                      setAuthError(err.message || 'Google Sign-In failed');
+                      setModal('Account');
+                    }
+                  }}
+                >
+                  <GoogleIcon size={16} />
+                  {firebaseUser ? `Connected as ${firebaseUser.email}` : 'Sign in with Google'}
+                </button>
+                {firebaseUser && (
+                  <span style={{ fontSize: '11px', color: '#95c69c' }}>✓ Authenticated via Firebase</span>
+                )}
+              </div>
+              <hr />
               <h2>Explore the interface</h2>
               <p>Toggle between User workspace and Administration console.</p>
               <button
@@ -1895,6 +1968,34 @@ export function App() {
                         <span className="badge">PLAN: {userPlanDisplay}</span>
                       </div>
                     </div>
+
+                    {!firebaseUser ? (
+                      <div style={{ margin: '16px 0', padding: '14px', background: '#16171a', border: '1px solid #36373d', borderRadius: '8px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)', marginBottom: '10px' }}>
+                          Currently in local developer session. Connect with Google for cloud synchronization:
+                        </div>
+                        <button
+                          className="primary"
+                          style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', padding: '10px' }}
+                          onClick={async () => {
+                            try {
+                              await loginWithGoogle();
+                              notify('Signed in with Google!');
+                              setModal('');
+                            } catch (err: any) {
+                              setAuthError(err.message || 'Google Sign-In failed');
+                            }
+                          }}
+                        >
+                          <GoogleIcon size={16} /> Sign in with Google
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ margin: '14px 0', padding: '10px 14px', background: '#142018', border: '1px solid #2d4f37', borderRadius: '6px', fontSize: '11px', color: '#95c69c', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <GoogleIcon size={14} /> Connected with Google ({firebaseUser.email})
+                      </div>
+                    )}
+
                     <button
                       className="secondary"
                       style={{ width: '100%', display: 'flex', justifyContent: 'center', gap: '8px' }}
@@ -1943,7 +2044,7 @@ export function App() {
                     {/* Google Sign-In */}
                     <button
                       className="secondary"
-                      style={{ width: '100%', display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '15px' }}
+                      style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '15px', padding: '10px' }}
                       onClick={async () => {
                         try {
                           await loginWithGoogle();
@@ -1954,7 +2055,7 @@ export function App() {
                         }
                       }}
                     >
-                      <Globe size={16} /> Sign in with Google
+                      <GoogleIcon size={16} /> Sign in with Google
                     </button>
 
                     <div style={{ textAlign: 'center', fontSize: '10px', color: 'var(--muted)', margin: '12px 0' }}>OR EMAIL / PASSWORD</div>
