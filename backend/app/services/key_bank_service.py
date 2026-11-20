@@ -80,18 +80,27 @@ class KeyBankService:
             k = raw_key.strip()
             if k and k not in seen_keys and len(k) > 10:
                 seen_keys.add(k)
-                record = KeyRecord(key_id=f"kb_{uuid.uuid4().hex[:8]}", api_key=k, provider="groq")
+                provider = "nvidia" if k.startswith("nvapi-") else "groq"
+                record = KeyRecord(key_id=f"kb_{uuid.uuid4().hex[:8]}", api_key=k, provider=provider)
                 self._keys.append(record)
 
-        # 1. Load from environment variable (comma-separated)
+        # 1. Load Groq keys from environment
         env_keys_str = self.settings.KEY_BANK_GROQ_KEYS or ""
         if env_keys_str:
             for k in env_keys_str.split(","):
                 add_single_key(k)
 
-        # 2. Single GROQ_API_KEY fallback
         if self.settings.GROQ_API_KEY:
             add_single_key(self.settings.GROQ_API_KEY)
+
+        # 2. Load NVIDIA NIM keys from environment
+        nv_keys_str = self.settings.KEY_BANK_NVIDIA_KEYS or ""
+        if nv_keys_str:
+            for k in nv_keys_str.split(","):
+                add_single_key(k)
+
+        if self.settings.NVIDIA_API_KEY:
+            add_single_key(self.settings.NVIDIA_API_KEY)
 
         # 3. Seed with defaults in production or when explicitly enabled in tests
         if self.settings.APP_ENV != "testing" or os.environ.get("ENABLE_KEY_BANK_TESTS"):
@@ -176,11 +185,22 @@ class KeyBankService:
                 "Content-Type": "application/json"
             }
 
+            if key_record.provider == "nvidia":
+                endpoint = "https://integrate.api.nvidia.com/v1/chat/completions"
+                engine_model = "google/gemma-4-31b-it" if "cyrus" in model_name.lower() else "mistralai/mistral-large-4-1t-a52b"
+                timeout_sec = 25.0
+            else:
+                endpoint = "https://api.groq.com/openai/v1/chat/completions"
+                engine_model = self.map_model_name(model_name)
+                timeout_sec = 45.0
+
+            payload["model"] = engine_model
+
             try:
                 if not stream:
-                    async with httpx.AsyncClient(timeout=45.0) as client:
+                    async with httpx.AsyncClient(timeout=timeout_sec) as client:
                         resp = await client.post(
-                            "https://api.groq.com/openai/v1/chat/completions",
+                            endpoint,
                             headers=headers,
                             json=payload
                         )
@@ -208,10 +228,10 @@ class KeyBankService:
 
                 else:
                     # Streaming path: verify stream connects before yielding
-                    client = httpx.AsyncClient(timeout=60.0)
+                    client = httpx.AsyncClient(timeout=timeout_sec)
                     req = client.build_request(
                         "POST",
-                        "https://api.groq.com/openai/v1/chat/completions",
+                        endpoint,
                         headers=headers,
                         json=payload
                     )

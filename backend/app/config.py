@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     # Key Bank (Multi-account pool for zero-limit inference)
     KEY_BANK_GROQ_KEYS: str = ""
     GROQ_API_KEY: str = ""
+    KEY_BANK_NVIDIA_KEYS: str = ""
+    NVIDIA_API_KEY: str = ""
 
     # CORS
     CORS_ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
