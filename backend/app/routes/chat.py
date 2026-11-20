@@ -3,6 +3,7 @@ import json
 import asyncio
 import re
 import hashlib
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any, Union, List
@@ -24,6 +25,7 @@ from app.security.api_key_auth import get_api_key_user
 from app.services.subscription_service import subscription_service
 from app.services.model_service import model_service
 from app.services.job_service import job_service
+from app.services.key_bank_service import key_bank_service
 from app.scheduler.model_router import model_router
 from app.utils.logging import setup_logger
 
@@ -160,6 +162,96 @@ async def create_chat_completion(
         payload["functions"] = request.functions
     if request.function_call:
         payload["function_call"] = request.function_call
+
+    # 5.5 Fast Direct Execution via Key Bank (Load-Balanced Across All Free Accounts)
+    if key_bank_service.has_active_keys():
+        logger.info(f"Fulfilling chat completion via KeyBankService [Model: {target_model_name}, stream={request.stream}]")
+        try:
+            bank_res = await key_bank_service.execute_completion(
+                model_name=target_model_name,
+                messages=processed_messages,
+                temperature=eff_temperature,
+                max_tokens=request.max_tokens,
+                top_p=eff_top_p,
+                stream=False
+            )
+            raw_text = bank_res.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if not raw_text:
+                raw_text = bank_res.get("choices", [{}])[0].get("message", {}).get("reasoning", "")
+            output_text = sanitize_brand_text(raw_text or "", target_model_name)
+
+            job_id = f"bank_{uuid.uuid4().hex[:12]}"
+            created_ts = int(time.time())
+
+            if request.stream:
+                async def sse_bank_stream():
+                    chunk_id = f"chatcmpl-{job_id}"
+                    initial_chunk = {
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_ts,
+                        "model": target_model_name,
+                        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]
+                    }
+                    yield f"data: {json.dumps(initial_chunk)}\n\n"
+
+                    tokens = tokenize_stream_safely(output_text)
+                    for token in tokens:
+                        c = {
+                            "id": chunk_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_ts,
+                            "model": target_model_name,
+                            "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}]
+                        }
+                        yield f"data: {json.dumps(c)}\n\n"
+                        await asyncio.sleep(0.012)
+
+                    stop_chunk = {
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_ts,
+                        "model": target_model_name,
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+                    }
+                    yield f"data: {json.dumps(stop_chunk)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                return StreamingResponse(
+                    sse_bank_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                        "Access-Control-Allow-Origin": "*"
+                    }
+                )
+
+            # Non-streaming response
+            usage_data = bank_res.get("usage", {})
+            prompt_toks = usage_data.get("prompt_tokens", len(str(processed_messages)) // 4)
+            comp_toks = usage_data.get("completion_tokens", len(output_text) // 4)
+            return ChatCompletionResponse(
+                id=job_id,
+                object="chat.completion",
+                created=created_ts,
+                model=target_model_name,
+                choices=[
+                    ChatChoice(
+                        index=0,
+                        message=ChatMessage(role="assistant", content=output_text),
+                        finish_reason="stop"
+                    )
+                ],
+                usage=UsageInfo(
+                    prompt_tokens=prompt_toks,
+                    completion_tokens=comp_toks,
+                    total_tokens=prompt_toks + comp_toks
+                )
+            )
+        except Exception as bank_err:
+            logger.warning(f"KeyBankService direct inference encountered error: {bank_err}. Falling back to worker queue...")
 
     job = job_service.create_chat_job(
         user_id=user_id,

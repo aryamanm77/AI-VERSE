@@ -1,15 +1,45 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import Dict, Any, List, Optional
+from pydantic import BaseModel
 from app.schemas.workers import WorkerAdminCreateRequest, WorkerCreatedResponse, WorkerResponse
 from app.security.permissions import require_admin
 from app.services.worker_service import worker_service
 from app.services.job_service import job_service
 from app.services.usage_service import usage_service
 from app.services.firebase_service import firebase_service
+from app.services.key_bank_service import key_bank_service
 from app.utils.logging import setup_logger
 
 logger = setup_logger("admin_routes")
 router = APIRouter(prefix="/api/admin", tags=["Admin Portal"])
+
+
+class AddKeyBankRequest(BaseModel):
+    key: str
+    provider: str = "groq"
+
+
+@router.get("/key-bank")
+async def get_key_bank_status(admin: Dict[str, Any] = Depends(require_admin)):
+    """Returns the health status and usage metrics of all keys in the bank."""
+    return {
+        "total_keys": key_bank_service.total_keys_count(),
+        "active_keys": key_bank_service.active_keys_count(),
+        "keys": key_bank_service.get_bank_status()
+    }
+
+
+@router.post("/key-bank")
+async def add_key_to_bank(
+    body: AddKeyBankRequest,
+    admin: Dict[str, Any] = Depends(require_admin)
+):
+    """Adds a new API key to the live pool."""
+    import uuid
+    from app.services.key_bank_service import KeyRecord
+    record = KeyRecord(key_id=f"kb_{uuid.uuid4().hex[:8]}", api_key=body.key, provider=body.provider)
+    key_bank_service._keys.append(record)
+    return {"status": "added", "key_id": record.key_id, "masked_key": record.masked_key}
 
 
 @router.get("/overview")

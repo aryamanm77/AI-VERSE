@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     WORKER_TOKEN_HASH_SECRET: str = "dev_worker_token_secret_replace_in_prod_32chars"
     API_KEY_HASH_SECRET: str = "dev_api_key_secret_replace_in_prod_32chars_min"
 
+    # Key Bank (Multi-account pool for zero-limit inference)
+    KEY_BANK_GROQ_KEYS: str = ""
+    GROQ_API_KEY: str = ""
+
     # CORS
     CORS_ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
 
