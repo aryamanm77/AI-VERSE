@@ -957,16 +957,7 @@ export function App() {
           <span className="brand-dot">.</span>
         </a>
 
-        <button className="workspace" onClick={() => setModal('Workspace')}>
-          <span className="workspace-avatar">{userInitial}</span>
-          <span>
-            {user ? (user.displayName || user.email.split('@')[0]) : 'Personal workspace'}
-            <small>{user ? `${user.role.toUpperCase()} · ${userPlanDisplay}` : 'Developer account'}</small>
-          </span>
-          <ChevronDown size={14} />
-        </button>
-
-        <div className="nav-caption">{admin ? 'ADMINISTRATION' : 'WORKSPACE'}</div>
+        <div style={{ marginTop: '24px' }} className="nav-caption">{admin ? 'ADMINISTRATION' : 'WORKSPACE'}</div>
         <nav>
           {(admin ? adminNav : nav).map(([name, Icon]) => (
             <button className={page === name ? 'nav-item active' : 'nav-item'} onClick={() => go(name)} key={name}>
@@ -988,7 +979,7 @@ export function App() {
           Settings
         </button>
 
-        <div className="sidebar-bottom">
+        <div className="sidebar-bottom" style={{ paddingBottom: '24px' }}>
           <div className="upgrade">
             <span className="upgrade-orbit">✧</span>
             <strong>A little more possibility.</strong>
@@ -1002,21 +993,6 @@ export function App() {
               <ArrowUpRight size={15} />
             </button>
           </div>
-
-          <button className="system-status" onClick={() => setModal('Connection status')}>
-            <i className={`dot ${backendHealth ? 'amber' : 'muted'}`} />
-            {backendHealth ? 'FastAPI Connected' : 'Setup required'}
-            <ArrowUpRight size={13} />
-          </button>
-
-          <button className="profile" onClick={() => setModal('Account')}>
-            <span className="avatar">{userInitial}</span>
-            <span>
-              {user ? (user.displayName || user.email.split('@')[0]) : 'Developer'}
-              <small>{user ? user.email : 'Workspace Account'}</small>
-            </span>
-            <ChevronDown size={14} />
-          </button>
         </div>
       </aside>
 
