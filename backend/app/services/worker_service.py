@@ -211,7 +211,28 @@ class WorkerService:
 
     def list_workers(self) -> List[Dict[str, Any]]:
         self.check_and_update_offline_workers()
-        return firebase_service.query_collection("workers", order_by="registeredAt", descending=True)
+        workers = firebase_service.query_collection("workers", order_by="registeredAt", descending=True)
+        # Inject live Key Bank cloud workers
+        try:
+            from app.services.key_bank_service import key_bank_service
+            if key_bank_service.has_active_keys():
+                bank_keys = key_bank_service.get_bank_status()
+                for k in bank_keys:
+                    workers.append({
+                        "workerId": f"bank-{k['provider']}-{k['key_id']}",
+                        "modelId": "cyrus" if k["provider"] == "groq" else ("cyran" if k["provider"] == "cloudflare" else "cyrus"),
+                        "provider": f"{k['provider'].upper()} Key Bank",
+                        "status": "online" if k["status"] == "active" else "degraded",
+                        "registeredAt": utc_iso_now(),
+                        "lastHeartbeat": utc_iso_now(),
+                        "completedJobs": k["success_count"],
+                        "failedJobs": k["failure_count"],
+                        "totalJobs": k["success_count"] + k["failure_count"],
+                        "gpuName": f"Cloud Engine ({k['masked_key']})"
+                    })
+        except Exception as e:
+            logger.warning(f"Failed to append key bank workers: {e}")
+        return workers
 
     def list_worker_events(self, worker_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         filters = [("workerId", "==", worker_id)] if worker_id else None

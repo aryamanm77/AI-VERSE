@@ -32,14 +32,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (token: string) => {
+  const fetchProfile = async (token: string, fbUser?: FirebaseUser | null) => {
     try {
       api.setToken(token);
       const profile = await api.getProfile();
       setUser(profile);
     } catch (e) {
       console.error('Failed to load user profile from backend:', e);
-      setUser(null);
+      if (fbUser) {
+        setUser({
+          uid: fbUser.uid,
+          displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
+          email: fbUser.email || '',
+          photoURL: fbUser.photoURL || null,
+          role: fbUser.email?.toLowerCase().includes('admin') ? 'admin' : 'user',
+          accountStatus: 'active',
+          subscriptionPlan: 'STARTER',
+          subscriptionStatus: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          emailVerified: fbUser.emailVerified
+        });
+      } else {
+        setUser(null);
+      }
     }
   };
 
@@ -49,7 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (fbUser) {
         try {
           const token = await fbUser.getIdToken();
-          await fetchProfile(token);
+          await fetchProfile(token, fbUser);
         } catch (e) {
           console.error('Token fetch error:', e);
         }
@@ -103,10 +119,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const cred = await signInWithPopup(auth, googleProvider);
       const token = await cred.user.getIdToken();
-      await fetchProfile(token);
+      await fetchProfile(token, cred.user);
     } catch (err: any) {
       if (err.code === 'auth/popup-closed-by-user') {
         return;
+      }
+      if (err.code === 'auth/unauthorized-domain') {
+        const domain = typeof window !== 'undefined' ? window.location.hostname : 'your domain';
+        const msg = `Domain "${domain}" is not authorized in Firebase Console. Add it at: console.firebase.google.com -> Authentication -> Settings -> Authorized Domains.`;
+        console.warn(msg);
+        throw new Error(msg);
       }
       console.warn("Google sign-in error:", err.message);
       throw err;

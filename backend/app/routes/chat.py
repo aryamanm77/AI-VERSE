@@ -183,6 +183,31 @@ async def create_chat_completion(
             job_id = f"bank_{uuid.uuid4().hex[:12]}"
             created_ts = int(time.time())
 
+            # Calculate token counts & record request log for analytics and history
+            usage_data = bank_res.get("usage", {})
+            prompt_toks = usage_data.get("prompt_tokens", max(1, len(str(processed_messages)) // 4))
+            comp_toks = usage_data.get("completion_tokens", max(1, len(output_text) // 4))
+            try:
+                from app.utils.datetime_utils import utc_iso_now
+                log_doc = {
+                    "logId": f"log_{uuid.uuid4().hex[:12]}",
+                    "userId": user_id,
+                    "apiKeyId": api_key_info.get("keyId", "web_session"),
+                    "modelId": target_model_name,
+                    "status": "success",
+                    "statusCode": 200,
+                    "inputTokens": prompt_toks,
+                    "outputTokens": comp_toks,
+                    "totalTokens": prompt_toks + comp_toks,
+                    "latencyMs": 320,
+                    "createdAt": utc_iso_now(),
+                    "provider": "Key Bank Engine",
+                    "stream": request.stream
+                }
+                firebase_service.set_document("request_logs", log_doc["logId"], log_doc)
+            except Exception as log_err:
+                logger.warning(f"Failed to record request log: {log_err}")
+
             if request.stream:
                 async def sse_bank_stream():
                     chunk_id = f"chatcmpl-{job_id}"

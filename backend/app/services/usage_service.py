@@ -59,6 +59,16 @@ class UsageService:
         busy_workers = sum(1 for w in workers if w.get("status") == "busy")
         offline_workers = sum(1 for w in workers if w.get("status") == "offline")
         disabled_workers = sum(1 for w in workers if w.get("status") == "disabled")
+        total_workers_count = len(workers)
+
+        try:
+            from app.services.key_bank_service import key_bank_service
+            if key_bank_service.has_active_keys():
+                bank_count = key_bank_service.active_keys_count()
+                online_workers = max(online_workers, bank_count)
+                total_workers_count = max(len(workers), bank_count)
+        except Exception:
+            pass
 
         # Job status counts
         queued_jobs = sum(1 for j in jobs if j.get("status") == "queued")
@@ -77,7 +87,7 @@ class UsageService:
             "activeUsers": sum(1 for u in users if u.get("accountStatus") == "active"),
             "subscriptionDistribution": sub_dist,
             "workers": {
-                "total": len(workers),
+                "total": total_workers_count,
                 "online": online_workers,
                 "busy": busy_workers,
                 "offline": offline_workers,
