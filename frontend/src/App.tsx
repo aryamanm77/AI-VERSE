@@ -210,7 +210,17 @@ export function App() {
   const [prompt, setPrompt] = useState('');
   const [response, setResponse] = useState('');
   const [busy, setBusy] = useState(false);
-  const [url, setUrl] = useState(() => localStorage.getItem('aiverse-url') || 'http://localhost:8000');
+  const PROD_BACKEND_URL = (import.meta.env.VITE_API_BASE_URL as string) || 'https://ai-verse-backend-impj.onrender.com';
+  const [url, setUrl] = useState(() => {
+    const saved = localStorage.getItem('aiverse-url');
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      if (!saved || saved.includes('localhost') || saved.includes('127.0.0.1')) {
+        localStorage.setItem('aiverse-url', PROD_BACKEND_URL);
+        return PROD_BACKEND_URL;
+      }
+    }
+    return saved || PROD_BACKEND_URL;
+  });
   const [key, setKey] = useState(() => localStorage.getItem('aiverse-key') || '');
   const [search, setSearch] = useState('');
 
@@ -1198,7 +1208,7 @@ export function App() {
               <p>Connect this interface to your own deployed AI VERSE API. Your settings are remembered on this device.</p>
               <label>
                 HTTPS API base URL
-                <input placeholder="http://localhost:8000" value={url} onChange={(e) => setUrl(e.target.value)} />
+                <input placeholder="https://ai-verse-backend-impj.onrender.com" value={url} onChange={(e) => setUrl(e.target.value)} />
               </label>
               <label>
                 AI VERSE API key
