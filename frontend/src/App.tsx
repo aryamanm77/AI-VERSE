@@ -893,39 +893,6 @@ export function App() {
             )}
           </div>
 
-          {/* Instant Developer Sandbox */}
-          <div className="login-sandbox-box">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span>⚡ Fast-Track Developer Access</span>
-              <span className="badge" style={{ fontSize: '8px' }}>Sandbox</span>
-            </div>
-            <div className="sandbox-btn-row">
-              <button
-                type="button"
-                className="sandbox-btn"
-                onClick={async () => {
-                  await devLogin('user', 'STARTER');
-                  notify('Logged in as Dev User');
-                  go('Overview');
-                }}
-              >
-                Dev User
-              </button>
-              <button
-                type="button"
-                className="sandbox-btn"
-                onClick={async () => {
-                  await devLogin('admin', 'ULTRA');
-                  setAdmin(true);
-                  notify('Logged in as Dev Admin');
-                  go('Admin Overview');
-                }}
-              >
-                Dev Admin
-              </button>
-            </div>
-          </div>
-
           {/* Public links */}
           <div className="login-footer-links">
             <button type="button" onClick={() => go('Documentation')}>Docs</button>
