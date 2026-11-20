@@ -81,7 +81,53 @@ class FirebaseService:
                 }
             },
             "request_jobs": {},
-            "request_logs": {},
+            "request_logs": {
+                "log_init_001": {
+                    "logId": "log_init_001",
+                    "userId": "user_verse_dev",
+                    "apiKeyId": "dev_user_verse_dev",
+                    "modelId": "cyrus",
+                    "status": "success",
+                    "statusCode": 200,
+                    "inputTokens": 48,
+                    "outputTokens": 182,
+                    "totalTokens": 230,
+                    "latencyMs": 312,
+                    "createdAt": "2026-11-20T16:00:00.000Z",
+                    "provider": "Key Bank Engine",
+                    "stream": True
+                },
+                "log_init_002": {
+                    "logId": "log_init_002",
+                    "userId": "user_verse_dev",
+                    "apiKeyId": "dev_user_verse_dev",
+                    "modelId": "cyran",
+                    "status": "success",
+                    "statusCode": 200,
+                    "inputTokens": 64,
+                    "outputTokens": 240,
+                    "totalTokens": 304,
+                    "latencyMs": 428,
+                    "createdAt": "2026-11-20T16:30:00.000Z",
+                    "provider": "Key Bank Engine",
+                    "stream": True
+                },
+                "log_init_003": {
+                    "logId": "log_init_003",
+                    "userId": "admin_verse_dev",
+                    "apiKeyId": "dev_admin_verse_dev",
+                    "modelId": "cyrus",
+                    "status": "success",
+                    "statusCode": 200,
+                    "inputTokens": 32,
+                    "outputTokens": 110,
+                    "totalTokens": 142,
+                    "latencyMs": 285,
+                    "createdAt": "2026-11-20T17:00:00.000Z",
+                    "provider": "Key Bank Engine",
+                    "stream": True
+                }
+            },
             "worker_events": {},
             "usage_records": {},
             "system_settings": {
@@ -256,6 +302,19 @@ class FirebaseService:
             return [d.to_dict() for d in docs]
         except Exception as e:
             logger.error(f"Firestore query error on {collection}: {e}")
+            if order_by and filters:
+                try:
+                    logger.info(f"Retrying query without composite order_by on {collection}...")
+                    ref = self._db.collection(collection)
+                    for f_field, f_op, f_val in filters:
+                        ref = ref.where(f_field, f_op, f_val)
+                    docs = [d.to_dict() for d in ref.stream()]
+                    docs.sort(key=lambda x: str(x.get(order_by, "")), reverse=descending)
+                    if limit:
+                        docs = docs[:limit]
+                    return docs
+                except Exception as retry_err:
+                    logger.error(f"Firestore fallback query failed: {retry_err}")
             return []
 
     def verify_firebase_id_token(self, token: str) -> Optional[Dict[str, Any]]:

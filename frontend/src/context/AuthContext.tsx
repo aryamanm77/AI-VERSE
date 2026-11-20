@@ -75,18 +75,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (devToken) {
           await fetchProfile(devToken);
         } else {
-          const wasLoggedOut = localStorage.getItem('ai_verse_logged_out');
-          if (!wasLoggedOut) {
-            try {
-              await devLogin('user', 'STARTER');
-            } catch (err) {
-              api.setToken(null);
-              setUser(null);
-            }
-          } else {
-            api.setToken(null);
-            setUser(null);
-          }
+          api.setToken(null);
+          setUser(null);
         }
       }
       setLoading(false);

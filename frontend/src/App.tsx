@@ -223,13 +223,11 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const PROD_BACKEND_URL = (import.meta.env.VITE_API_BASE_URL as string) || 'https://ai-verse-backend-impj.onrender.com';
   const [url, setUrl] = useState(() => {
-    const saved = localStorage.getItem('aiverse-url');
     if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      if (!saved || saved.includes('localhost') || saved.includes('127.0.0.1')) {
-        localStorage.setItem('aiverse-url', PROD_BACKEND_URL);
-        return PROD_BACKEND_URL;
-      }
+      localStorage.setItem('aiverse-url', PROD_BACKEND_URL);
+      return PROD_BACKEND_URL;
     }
+    const saved = localStorage.getItem('aiverse-url');
     return saved || PROD_BACKEND_URL;
   });
   const [key, setKey] = useState(() => localStorage.getItem('aiverse-key') || '');
@@ -272,6 +270,8 @@ export function App() {
     setMobile(false);
     setSearch('');
     const pathMap: Record<string, string> = {
+      'Login': '/login',
+      'Register': '/register',
       'Overview': '/',
       'Playground': '/playground',
       'API Keys': '/keys',
@@ -310,10 +310,10 @@ export function App() {
   useEffect(() => {
     const path = window.location.pathname.toLowerCase();
     if (path === '/login') {
-      setModal('Account');
+      setPage('Login');
       setAuthMode('login');
     } else if (path === '/register') {
-      setModal('Account');
+      setPage('Register');
       setAuthMode('register');
     } else if (path === '/playground') {
       setPage('Playground');
@@ -511,7 +511,10 @@ export function App() {
 
   // Handle Send Chat Request with Real-Time SSE Token Streaming
   async function send() {
-    if (url && !url.startsWith('https://') && !url.includes('localhost') && !url.includes('127.0.0.1')) {
+    const targetUrl = (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+      ? PROD_BACKEND_URL
+      : (url || PROD_BACKEND_URL);
+    if (targetUrl && !targetUrl.startsWith('https://') && !targetUrl.includes('localhost') && !targetUrl.includes('127.0.0.1')) {
       notify('Please use an HTTPS backend URL in production');
       return;
     }
@@ -521,7 +524,7 @@ export function App() {
     setBusy(true);
     setResponse('');
     try {
-      let r = await fetch(url.replace(/\/$/, '') + '/v1/chat/completions', {
+      let r = await fetch(targetUrl.replace(/\/$/, '') + '/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -537,7 +540,7 @@ export function App() {
 
       if (r.status === 401 && sessionToken && tokenToUse !== sessionToken) {
         tokenToUse = sessionToken;
-        r = await fetch(url.replace(/\/$/, '') + '/v1/chat/completions', {
+        r = await fetch(targetUrl.replace(/\/$/, '') + '/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -726,6 +729,216 @@ export function App() {
   const userInitial = user?.displayName ? user.displayName.charAt(0).toUpperCase() : user?.email ? user.email.charAt(0).toUpperCase() : 'D';
   const userPlanDisplay = user?.subscriptionPlan || 'STARTER';
 
+  const isPublicPage = page === 'Documentation' || page === 'Models' || page === 'Subscription';
+  const isAuthPage = !user || page === 'Login' || page === 'Register';
+
+  if (isAuthPage && !isPublicPage) {
+    return (
+      <div className="login-screen">
+        {toast && <div className="toast">{toast}</div>}
+        <div className="login-card">
+          <div className="login-brand">
+            <div className="login-logo">
+              <Orbit size={28} />
+            </div>
+            <h1>AI VERSE<span style={{ color: 'var(--orange)' }}>.</span></h1>
+            <p>One Universe. Infinite Intelligence.</p>
+          </div>
+
+          <div style={{ textAlign: 'center', marginTop: '-4px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: 650, color: '#fff' }}>
+              {authMode === 'login' ? 'Sign In to Your Workspace' : 'Create an Account'}
+            </h2>
+            <p style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
+              {authMode === 'login'
+                ? 'Access your API keys, worker playground, and analytics'
+                : 'Join the next generation compute platform powered by CYRUS & CYRAN'}
+            </p>
+          </div>
+
+          {authError && (
+            <div style={{ background: '#221111', border: '1px solid #6b2626', borderRadius: '8px', padding: '12px', fontSize: '11px', color: '#ff8a8a', lineHeight: '1.4' }}>
+              <div><strong>Notice:</strong> {authError}</div>
+              {authError.includes('Firebase Console') && (
+                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #4a1c1c' }}>
+                  <a
+                    href="https://console.firebase.google.com/project/ai-verse-7ac4e/authentication/settings"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#ffae84', textDecoration: 'underline', display: 'inline-block', marginBottom: '8px' }}
+                  >
+                    Open Firebase Console Authorized Domains →
+                  </a>
+                  <button
+                    type="button"
+                    className="secondary"
+                    style={{ width: '100%', fontSize: '11px', padding: '6px' }}
+                    onClick={async () => {
+                      await devLogin('user', 'STARTER');
+                      notify('Logged in as Dev User');
+                      go('Overview');
+                    }}
+                  >
+                    Continue with Instant Dev Sandbox
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Prominent Google Sign-In Button */}
+          <button
+            type="button"
+            className="google-btn"
+            disabled={authLoading}
+            onClick={async () => {
+              setAuthLoading(true);
+              setAuthError('');
+              try {
+                await loginWithGoogle();
+                notify('Signed in with Google!');
+                go('Overview');
+              } catch (err: any) {
+                setAuthError(err.message || 'Google Sign-In failed');
+              } finally {
+                setAuthLoading(false);
+              }
+            }}
+          >
+            <GoogleIcon size={18} />
+            <span>Continue with Google</span>
+          </button>
+
+          <div className="login-divider">or with email</div>
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setAuthLoading(true);
+              setAuthError('');
+              try {
+                if (authMode === 'login') {
+                  await login(authEmail, authPassword);
+                  notify('Signed in successfully!');
+                } else {
+                  await register(authEmail, authPassword);
+                  notify('Account created successfully!');
+                }
+                go('Overview');
+              } catch (err: any) {
+                setAuthError(err.message || 'Authentication failed');
+              } finally {
+                setAuthLoading(false);
+              }
+            }}
+            style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}
+          >
+            <div className="login-input-group">
+              <label>Email Address</label>
+              <input
+                type="email"
+                required
+                placeholder="developer@example.com"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+              />
+            </div>
+            <div className="login-input-group">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label>Password</label>
+                {authMode === 'login' && (
+                  <span style={{ fontSize: '10px', color: 'var(--orange)', cursor: 'pointer' }} onClick={() => notify('Password reset link sent if registered')}>
+                    Forgot password?
+                  </span>
+                )}
+              </div>
+              <input
+                type="password"
+                required
+                placeholder="••••••••"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+              />
+            </div>
+
+            <button type="submit" className="login-submit-btn" disabled={authLoading}>
+              {authLoading ? <LoaderCircle size={16} className="spin" /> : <ArrowRight size={16} />}
+              <span>{authLoading ? 'Authenticating...' : authMode === 'login' ? 'Sign In' : 'Create Account'}</span>
+            </button>
+          </form>
+
+          <div style={{ textAlign: 'center', fontSize: '12px', color: 'var(--muted)' }}>
+            {authMode === 'login' ? (
+              <span>
+                Don’t have an account?{' '}
+                <button
+                  type="button"
+                  style={{ color: 'var(--orange)', fontWeight: 600, textDecoration: 'underline' }}
+                  onClick={() => { setAuthMode('register'); setAuthError(''); }}
+                >
+                  Sign up
+                </button>
+              </span>
+            ) : (
+              <span>
+                Already have an account?{' '}
+                <button
+                  type="button"
+                  style={{ color: 'var(--orange)', fontWeight: 600, textDecoration: 'underline' }}
+                  onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                >
+                  Sign in
+                </button>
+              </span>
+            )}
+          </div>
+
+          {/* Instant Developer Sandbox */}
+          <div className="login-sandbox-box">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>⚡ Fast-Track Developer Access</span>
+              <span className="badge" style={{ fontSize: '8px' }}>Sandbox</span>
+            </div>
+            <div className="sandbox-btn-row">
+              <button
+                type="button"
+                className="sandbox-btn"
+                onClick={async () => {
+                  await devLogin('user', 'STARTER');
+                  notify('Logged in as Dev User');
+                  go('Overview');
+                }}
+              >
+                Dev User
+              </button>
+              <button
+                type="button"
+                className="sandbox-btn"
+                onClick={async () => {
+                  await devLogin('admin', 'ULTRA');
+                  setAdmin(true);
+                  notify('Logged in as Dev Admin');
+                  go('Admin Overview');
+                }}
+              >
+                Dev Admin
+              </button>
+            </div>
+          </div>
+
+          {/* Public links */}
+          <div className="login-footer-links">
+            <button type="button" onClick={() => go('Documentation')}>Docs</button>
+            <span>·</span>
+            <button type="button" onClick={() => go('Models')}>Models</button>
+            <span>·</span>
+            <button type="button" onClick={() => go('Subscription')}>Pricing</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <aside className={mobile ? 'sidebar open' : 'sidebar'}>
@@ -828,42 +1041,52 @@ export function App() {
               Docs
               <ArrowUpRight size={14} />
             </button>
-            {!firebaseUser ? (
+            {!user ? (
               <button
-                className="secondary"
+                className="primary"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  padding: '6px 14px',
+                  padding: '7px 14px',
                   borderRadius: '6px',
                   fontSize: '11px',
-                  background: '#1b1d22',
-                  border: '1px solid #ffaa8466',
-                  color: '#fff',
                   cursor: 'pointer'
                 }}
-                onClick={async () => {
-                  try {
-                    await loginWithGoogle();
-                    notify('Signed in with Google!');
-                  } catch (err: any) {
-                    setAuthError(err.message || 'Google Sign-In failed');
-                    setModal('Account');
-                  }
-                }}
+                onClick={() => go('Login')}
               >
                 <GoogleIcon size={14} />
-                <span>Sign in with Google</span>
+                <span>Sign in</span>
               </button>
             ) : (
-              <span className="badge" style={{ border: '1px solid #4a6a50', color: '#95c69c', display: 'flex', gap: '6px', alignItems: 'center', padding: '5px 8px' }}>
-                <GoogleIcon size={12} /> Google Verified
-              </span>
+              <>
+                {firebaseUser ? (
+                  <span className="badge" style={{ border: '1px solid #4a6a50', color: '#95c69c', display: 'flex', gap: '6px', alignItems: 'center', padding: '5px 8px' }}>
+                    <GoogleIcon size={12} /> Google Verified
+                  </span>
+                ) : (
+                  <span className="badge" style={{ border: '1px solid #36373c', color: '#dca580', display: 'flex', gap: '6px', alignItems: 'center', padding: '5px 8px' }}>
+                    Sandbox Session
+                  </span>
+                )}
+                <button
+                  className="secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', fontSize: '11px', borderRadius: '6px' }}
+                  onClick={async () => {
+                    await logout();
+                    notify('Signed out');
+                    go('Login');
+                  }}
+                  title="Sign out"
+                >
+                  <LogOut size={13} />
+                  <span>Sign out</span>
+                </button>
+                <button className="avatar small" onClick={() => setModal('Account')}>
+                  {userInitial}
+                </button>
+              </>
             )}
-            <button className="avatar small" onClick={() => setModal('Account')}>
-              {userInitial}
-            </button>
           </div>
         </header>
 
@@ -1120,7 +1343,7 @@ export function App() {
                   required
                 />
                 <div>
-                  <span>{url ? `Backend: ${url}` : 'Connect a backend to send real requests'}</span>
+                  <span>{`Backend: ${(typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') ? PROD_BACKEND_URL : (url || PROD_BACKEND_URL)}`}</span>
                   <button className="primary" disabled={busy || !prompt.trim()}>
                     {busy ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}
                     Send

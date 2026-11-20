@@ -26,6 +26,7 @@ from app.services.subscription_service import subscription_service
 from app.services.model_service import model_service
 from app.services.job_service import job_service
 from app.services.key_bank_service import key_bank_service
+from app.services.firebase_service import firebase_service
 from app.scheduler.model_router import model_router
 from app.utils.logging import setup_logger
 

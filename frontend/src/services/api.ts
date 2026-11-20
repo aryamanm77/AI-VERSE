@@ -11,15 +11,16 @@ import {
 
 const getBaseUrl = (): string => {
   const prodUrl = (import.meta.env.VITE_API_BASE_URL as string) || 'https://ai-verse-backend-impj.onrender.com';
-  const custom = localStorage.getItem('aiverse-url');
-  if (custom && custom.trim()) {
-    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && (custom.includes('localhost') || custom.includes('127.0.0.1'))) {
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    const custom = localStorage.getItem('aiverse-url');
+    if (!custom || custom.includes('localhost') || custom.includes('127.0.0.1') || !custom.startsWith('https://')) {
       localStorage.setItem('aiverse-url', prodUrl);
       return prodUrl;
     }
     return custom.replace(/\/$/, '');
   }
-  return prodUrl;
+  const custom = localStorage.getItem('aiverse-url');
+  return (custom && custom.trim()) ? custom.replace(/\/$/, '') : prodUrl;
 };
 
 class ApiService {
